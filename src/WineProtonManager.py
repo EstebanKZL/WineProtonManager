@@ -494,6 +494,7 @@ class InstallerThread(QThread):
             if not self._is_running:
                 break
 
+            # Mostramos el nombre del archivo o el comando Winetricks tal cual está en config.json
             display_name = Path(item_path).name if item_type == "exe" else item_path
             self.progress.emit(idx, f"{display_name}: Instalando...")
             
@@ -513,7 +514,7 @@ class InstallerThread(QThread):
                         "--noclose",
                         "-e",
                         wine_binary,
-                        str(exe_path.absolute())
+                        item_path  # Usamos el path exacto del config.json
                     ]
                 else:
                     cmd = [
@@ -522,7 +523,7 @@ class InstallerThread(QThread):
                         "-e",
                         self.winetricks_path,
                         "--force",
-                        item_path
+                        item_path  # Usamos el comando Winetricks exacto del config.json
                     ]
                     if self.silent_mode:
                         cmd.insert(-1, "-q")
@@ -1179,10 +1180,10 @@ class CustomProgramDialog(QDialog):
             if not path_obj.exists():
                 raise FileNotFoundError(f"No se encontró el archivo: {path}")
             program_type = "exe"
-            # Guardamos la ruta absoluta normalizada
-            path = str(path_obj.absolute())
+            path = str(path_obj.absolute())  # <-- Guardamos ruta absoluta
         else:
             program_type = "winetricks"
+            # Para Winetricks, path ya es el nombre del componente (ej: "vcrun6")
         
         return {
             "name": name,
@@ -1608,28 +1609,26 @@ class InstallerApp(QWidget):
         if dialog.exec_() == QDialog.Accepted:
             try:
                 program_info = dialog.get_program_info()
-                program_path = program_info["path"]
+                program_path = program_info["path"]  # Ruta completa o comando Winetricks
                 program_name = program_info["name"]
                 program_type = program_info["type"]
 
                 display_type = "EXE" if program_type == "exe" else "Winetricks"
                 
-                # Añadimos a las listas internas
+                # Añadimos a las listas internas (usando el path/command exacto)
                 self.custom_programs.append(program_path)
                 self.custom_program_types.append(program_type)
                 
-                # Mostramos solo el nombre en la tabla
+                # Mostramos en la tabla (nombre en columna 1, path/command en columna 2)
                 self.add_item_to_table(program_name, display_type)
                 self.update_install_button()
                 
-                # Guardamos en la configuración - CORRECCIÓN AQUÍ
-                # Crear un diccionario con la información del programa
+                # Guardamos en config.json
                 program_data = {
                     "name": program_name,
-                    "path": program_path,
+                    "path": program_path,  # Guardamos el path/command exacto
                     "type": program_type
                 }
-                # Añadir el programa a la configuración
                 if "custom_programs" not in self.config_manager.configs:
                     self.config_manager.configs["custom_programs"] = []
                 self.config_manager.configs["custom_programs"].append(program_data)
@@ -1637,8 +1636,8 @@ class InstallerApp(QWidget):
                 
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Error al añadir programa:\n{str(e)}")
-            
-    def add_item_to_table(self, name, item_type, status="Pendiente"):
+                
+    def add_item_to_table(self, name, item_type, status="Pendiente", command=None):
         row = self.items_table.rowCount()
         self.items_table.insertRow(row)
         
@@ -1648,7 +1647,7 @@ class InstallerApp(QWidget):
         checkbox.setCheckState(Qt.Checked)
         self.items_table.setItem(row, 0, checkbox)
         
-        # Nombre (usamos el nombre del programa para programas personalizados)
+        # Nombre
         name_item = QTableWidgetItem(name)
         name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 1, name_item)
@@ -1658,10 +1657,15 @@ class InstallerApp(QWidget):
         type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 2, type_item)
         
+        # Comando (nueva columna)
+        command_item = QTableWidgetItem(command if command else name)
+        command_item.setFlags(command_item.flags() & ~Qt.ItemIsEditable)
+        self.items_table.setItem(row, 3, command_item)
+        
         # Estado
         status_item = QTableWidgetItem(status)
         status_item.setFlags(status_item.flags() & ~Qt.ItemIsEditable)
-        self.items_table.setItem(row, 3, status_item)
+        self.items_table.setItem(row, 4, status_item)
     
     def load_custom_programs(self):
         dialog = LoadProgramsDialog(self.config_manager, self)
@@ -1940,21 +1944,21 @@ class InstallerApp(QWidget):
         all_types = []
         
         for row in range(self.items_table.rowCount()):
-            item_name = self.items_table.item(row, 1).text()
-            item_type = self.items_table.item(row, 2).text().lower()
+            item_name = self.items_table.item(row, 1).text()  # Nombre mostrado en la tabla
+            item_type = self.items_table.item(row, 2).text().lower()  # "exe" o "winetricks"
             
-            if item_type == "exe":
-                custom_programs = self.config_manager.get_custom_programs()
-                program_info = next((p for p in custom_programs if p['name'] in item_name), None)
-                if program_info:
-                    all_items.append(program_info['path'])
-                    all_types.append(program_info['type'])
-                else:
-                    all_items.append(item_name)
-                    all_types.append(item_type)
+            # Buscamos el programa en config.json por su nombre
+            custom_programs = self.config_manager.get_custom_programs()
+            program_info = next((p for p in custom_programs if p['name'] == item_name), None)
+            
+            if program_info:
+                # Usamos el path exacto guardado en config.json
+                all_items.append(program_info['path'])
+                all_types.append(program_info['type'])
             else:
+                # Si no está en custom_programs, es un componente Winetricks seleccionado manualmente
                 all_items.append(item_name)
-                all_types.append(item_type)
+                all_types.append("winetricks")
             
             self.items_table.item(row, 3).setText("Pendiente")
 
@@ -1965,9 +1969,6 @@ class InstallerApp(QWidget):
                 item_types=all_types,
                 silent_mode=self.silent_mode,
                 winetricks_path=self.config_manager.get_winetricks_path()
-            )
-            self.installer_thread.progress.connect(
-                lambda idx, msg: self.items_table.item(idx, 3).setText(msg)
             )
             self.installer_thread.finished.connect(self.installation_finished)
             self.installer_thread.error.connect(self.show_error)
