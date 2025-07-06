@@ -29,7 +29,7 @@
 
     ```bash
     # Requisitos previos
-    sudo apt install wine winetricks konsole  # Para Linux
+    sudo apt install wine winetricks konsole kdialog libssl3  # Para Linux
     
     # Clonar repositorio
     git clone https://github.com/EstebanKZL/WineProtonManager.git
