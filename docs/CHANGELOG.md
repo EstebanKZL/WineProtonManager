@@ -1,7 +1,6 @@
 # Changelog
 
 ## [v1.2.0] - 2025-07-06 🎉
-
 #### 1. Gestión de Consola (Konsole)
 - **Nuevo**: Cierre automático de Konsole al finalizar cada instalación
 - **Cambio**: Reemplazo de `--noclose` por `--hold` para mejor comportamiento
@@ -36,6 +35,12 @@
     1. Verificar permisos en ~/.config/WineProtonManager/logs/
     2. Los logs antiguos mantienen su formato original
     3. El modo silencioso ahora aplica consistentemente
+
+## [v1.1.0] - 2025-07-05 🎉
+### Fixed
+- Corrección de errores en gestión de prefixes
+- Mejoras en la detección de versiones
+- Fixed reparacion en la instlacion (.exe y .msi)
 
 ## [v1.0.0] - 2025-07-05 🎉
 ### Added
