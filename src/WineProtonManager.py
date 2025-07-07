@@ -553,31 +553,78 @@ class ConfigManager:
         return False
 
     def decompress_archive(self, archive_path):
-        """Descomprime un archivo en su directorio"""
+        """Descomprime un archivo en su directorio con manejo de errores mejorado"""
         path = Path(archive_path)
         dest_dir = path.parent
         
         try:
-            if path.suffixes == ['.tar', '.gz'] or path.suffix == '.tgz':
+            # Extraer el nombre base sin extensiones para crear el directorio de destino
+            base_name = path.name
+            while '.' in base_name:
+                base_name = base_name.rsplit('.', 1)[0]
+            
+            target_dir = dest_dir / base_name
+            
+            # Eliminar directorio existente si es necesario
+            if target_dir.exists():
+                shutil.rmtree(target_dir, ignore_errors=True)
+                time.sleep(0.5)  # Pequeño retraso para asegurar la eliminación
+            
+            # Crear directorio de destino
+            target_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Verificación robusta de formatos que ignora cualquier cosa antes de las extensiones reales
+            if path.name.endswith(('.tar.gz', '.tgz')):
                 # .tar.gz
                 with tarfile.open(path, "r:gz") as tar:
-                    tar.extractall(path=dest_dir)
-                return True
-            elif path.suffixes == ['.tar', '.xz'] or path.suffix == '.txz':
+                    tar.extractall(path=target_dir)
+            elif path.name.endswith(('.tar.xz', '.txz')):
                 # .tar.xz
-                with tarfile.open(path, "r:xz") as tar:
-                    tar.extractall(path=dest_dir)
-                return True
-            elif path.suffix == '.zip':
+                try:
+                    # Intento con Python si lzma está disponible
+                    import lzma
+                    with tarfile.open(path, "r:xz") as tar:
+                        tar.extractall(path=target_dir)
+                except ImportError:
+                    # Fallback al comando tar del sistema
+                    print("Usando comando tar del sistema para .tar.xz")
+                    result = subprocess.run(
+                        ["tar", "-xJf", str(path), "-C", str(target_dir)],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
+                    if result.returncode != 0:
+                        print(f"Error con tar: {result.stderr.decode()}")
+                        raise Exception(f"Error con tar: {result.stderr.decode()}")
+            elif path.suffix == '.zip' or path.name.endswith('.zip'):
                 # .zip
                 with zipfile.ZipFile(path, 'r') as zip_ref:
-                    zip_ref.extractall(dest_dir)
-                return True
+                    zip_ref.extractall(target_dir)
             else:
+                # Último intento: ver si es un archivo tar.xz por contenido
+                file_output = subprocess.run(["file", "-b", str(path)], 
+                                            capture_output=True, text=True).stdout
+                if 'XZ compressed data' in file_output:
+                    return self.decompress_archive(archive_path)  # Recursión forzada
                 print(f"Formato no soportado: {path}")
                 return False
+            
+            # Asignar permisos adecuados
+            for root, dirs, files in os.walk(target_dir):
+                for d in dirs:
+                    os.chmod(os.path.join(root, d), 0o755)
+                for f in files:
+                    os.chmod(os.path.join(root, f), 0o644)
+            
+            return True
         except Exception as e:
             print(f"Error al descomprimir {path}: {e}")
+            # Intentar limpiar la extracción parcial
+            try:
+                if target_dir.exists():
+                    shutil.rmtree(target_dir, ignore_errors=True)
+            except:
+                pass
             return False
 
 class DownloadThread(QThread):
@@ -1297,11 +1344,22 @@ class ConfigDialog(QDialog):
         self.progress_dialog.setLabelText(f"Descomprimiendo {name}...")
         self.progress_dialog.setMaximum(0)  # Modo indeterminado durante descompresión
         
-        # Crear un hilo para la descompresión
-        self.decompress_thread = DecompressThread(filepath, self.config_manager)
-        self.decompress_thread.finished.connect(lambda: self.on_decompress_finished(filepath, name))
-        self.decompress_thread.error.connect(self.show_decompress_error)
-        self.decompress_thread.start()
+        try:
+            # Llamar a la nueva lógica de descompresión
+            if self.config_manager.decompress_archive(filepath):
+                # Eliminar el archivo comprimido después de descomprimir
+                try:
+                    Path(filepath).unlink()
+                except Exception as e:
+                    print(f"No se pudo eliminar {filepath}: {e}")
+                
+                QMessageBox.information(self, "Éxito", f"Descarga y descompresión completadas:\n{name}")
+            else:
+                QMessageBox.critical(self, "Error", f"Error al descomprimir {name}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Excepción durante descompresión:\n{str(e)}")
+        finally:
+            self.progress_dialog.close()
 
     def show_decompress_error(self, error_msg):
         self.progress_dialog.close()
@@ -1505,12 +1563,12 @@ class ConfigDialog(QDialog):
         info = [
             f"<b>Nombre:</b> {config_name}",
             f"<b>Tipo:</b> {'Proton' if config['type'] == 'proton' else 'Wine'}",
-            f"<b>Versión:</b> <span style='color: #1a9fff; font-weight: bold;'>{version}</span>",
+            f"<b>Versión:</b> <span style='color: #27ae60; font-weight: bold;'>{version}</span>",
         ]
 
         if config['type'] == 'proton':
             info.extend([
-                f"<b>Wine en Proton:</b> <span style='color: #1a9fff; font-weight: bold;'>{wine_version_in_proton}</span>",
+                f"<b>Wine en Proton:</b> <span style='color: #27ae60; font-weight: bold;'>{wine_version_in_proton}</span>",
                 f"<b>Directorio Proton:</b> {config.get('proton_dir', 'No especificado')}"
             ])
         else:
@@ -1521,7 +1579,7 @@ class ConfigDialog(QDialog):
 
         info.extend([
             f"<b>Arquitectura:</b> {config.get('arch', 'win64')}",
-            f"<b>Prefix:</b> {config.get('prefix', 'No especificado')}"
+            f"<b>Prefix:</b> <span style='color: #FFB347; font-weight: bold;'>{config.get('prefix', 'No especificado')}"
         ])
 
         self.config_info.setText("<br>".join(info))
