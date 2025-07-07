@@ -4,6 +4,7 @@ import os
 import subprocess
 import json
 import re
+import time
 from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -162,6 +163,10 @@ class ConfigManager:
         self.config_file = config_dir / "config.json"
         config_dir.mkdir(parents=True, exist_ok=True)
         
+        # Crear directorio de logs si no existe
+        log_dir = config_dir / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
         self.configs = self.load_configs()
         self.ensure_default_config()
 
@@ -180,12 +185,11 @@ class ConfigManager:
         settings = self.configs.setdefault("settings", {
             "winetricks_path": str(Path(__file__).parent / "AppDir" / "usr" / "bin" / "winetricks"),
             "config_path": str(self.config_file),
-            "prefix_path": str(Path.home() / "WineProtonManager"),
             "theme": "light",
-            "window_size": [900, 650]
+            "window_size": [900, 650],
+            "silent_install": True  # Modo silencioso activado por defecto
         })
         
-        Path(settings["prefix_path"]).mkdir(parents=True, exist_ok=True)
         self.save_configs()
 
     def load_configs(self):
@@ -197,9 +201,9 @@ class ConfigManager:
             "settings": {
                 "winetricks_path": str(Path(__file__).parent / "AppDir" / "usr" / "bin" / "winetricks"),
                 "config_path": str(self.config_file),
-                "prefix_path": str(Path.home() / "WineProtonManager"),
                 "theme": "light",
-                "window_size": [900, 650]
+                "window_size": [900, 650],
+                "silent_install": True
             }
         }
         
@@ -420,14 +424,16 @@ class ConfigManager:
         """Obtiene la ruta del archivo de configuración"""
         return self.configs["settings"].get("config_path", str(Path.home() / ".config/wineprotonmanager_config.json"))
     
-    def set_prefix_path(self, path):
-        """Establece la ruta para los prefixes"""
-        self.configs["settings"]["prefix_path"] = path
+    def set_silent_install(self, enabled):
+        """Establece si la instalación silenciosa está activada"""
+        if "settings" not in self.configs:
+            self.configs["settings"] = {}
+        self.configs["settings"]["silent_install"] = enabled
         self.save_configs()
     
-    def get_prefix_path(self):
-        """Obtiene la ruta para los prefixes"""
-        return self.configs["settings"].get("prefix_path", str(Path.home() / "WineProtonManager"))
+    def get_silent_install(self):
+        """Obtiene si la instalación silenciosa está activada"""
+        return self.configs["settings"].get("silent_install", True)
 
     def remove_config(self, config_name):
         """Elimina una configuración guardada"""
@@ -462,27 +468,40 @@ class ConfigManager:
         """Obtiene el tamaño guardado de la ventana"""
         size = self.configs["settings"].get("window_size", [900, 650])
         return QSize(size[0], size[1])
+    
+    def get_log_path(self, program_name):
+        """Obtiene la ruta del archivo de log para un programa"""
+        config_dir = Path.home() / ".config" / "WineProtonManager" / "logs"
+        safe_name = re.sub(r'[^\w\-_.]', '_', program_name)
+        return config_dir / f"{safe_name}.log"
+    
+    def write_to_log(self, program_name, message):
+        """Escribe un mensaje en el log del programa"""
+        log_path = self.get_log_path(program_name)
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(f"[{timestamp}] {message}\n")
 
 class InstallerThread(QThread):
-    """Hilo optimizado para instalaciones"""
     progress = pyqtSignal(int, str)
     finished = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, items, env, item_types=None, silent_mode=False, winetricks_path="winetricks"):
+    def __init__(self, items, env, item_types=None, silent_mode=False, winetricks_path="winetricks", config_manager=None):
         super().__init__()
-        self.items = items  # Lista de paths (componentes winetricks o rutas de instaladores)
+        self.items = items
         self.env = env
         self._is_running = True
         self.silent_mode = silent_mode
-        self.item_types = item_types or []  # Lista de tipos ("winetricks" o "exe")
+        self.item_types = item_types or []
         self.winetricks_path = winetricks_path
+        self.config_manager = config_manager
 
     def run(self):
-        # Verificar si Konsole está instalado
         try:
             subprocess.run(["which", "konsole"], check=True,
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except Exception:
             self.error.emit(
                 "Konsole no está instalado. Es necesario para mostrar la consola.\n"
@@ -494,9 +513,12 @@ class InstallerThread(QThread):
             if not self._is_running:
                 break
 
-            # Mostramos el nombre del archivo o el comando Winetricks tal cual está en config.json
             display_name = Path(item_path).name if item_type == "exe" else item_path
             self.progress.emit(idx, f"{display_name}: Instalando...")
+            
+            # Crear archivo de log temporal
+            with tempfile.NamedTemporaryFile(delete=False) as temp_log:
+                temp_log_path = temp_log.name
             
             try:
                 if item_type == "exe":
@@ -509,26 +531,28 @@ class InstallerThread(QThread):
                         proton_dir = Path(self.env["PROTON_DIR"])
                         wine_binary = str(proton_dir / "files" / "bin" / "wine")
                     
+                    # Comando para ejecutable (.exe) - se cierra automáticamente
                     cmd = [
                         "konsole",
-                        "--noclose",
+                        "--nofork",  # Esto permite que konsole se cierre automáticamente
                         "-e",
-                        wine_binary,
-                        item_path  # Usamos el path exacto del config.json
+                        "bash", "-c",
+                        f"{wine_binary} '{item_path}' 2>&1 | tee '{temp_log_path}'; exit"
                     ]
+                    
                 else:
+                    # Comando para winetricks - se cierra automáticamente
+                    silent_flag = "-q" if self.silent_mode else ""
                     cmd = [
                         "konsole",
-                        "--hold",
+                        "--nofork",  # Esto permite que konsole se cierre automáticamente
                         "-e",
-                        self.winetricks_path,
-                        "--force",
-                        item_path  # Usamos el comando Winetricks exacto del config.json
+                        "bash", "-c",
+                        f"{self.winetricks_path} --force {silent_flag} '{item_path}' 2>&1 | tee '{temp_log_path}'; exit"
                     ]
-                    if self.silent_mode:
-                        cmd.insert(-1, "-q")
                 
-                result = subprocess.run(
+                # Ejecutar el comando
+                process = subprocess.Popen(
                     cmd,
                     env=self.env,
                     stdout=subprocess.PIPE,
@@ -536,16 +560,41 @@ class InstallerThread(QThread):
                     text=True
                 )
 
-                if result.returncode != 0:
-                    error_msg = result.stderr if result.stderr else result.stdout
+                # Esperar a que termine el proceso
+                process.wait()
+
+                # Leer el log temporal
+                with open(temp_log_path, 'r', encoding='utf-8', errors='replace') as log_file:
+                    log_content = log_file.read()
+                
+                # Guardar en el log permanente
+                if self.config_manager:
+                    self.config_manager.write_to_log(display_name, f"=== INICIO DE INSTALACIÓN ===")
+                    self.config_manager.write_to_log(display_name, f"Comando ejecutado: {' '.join(cmd)}")
+                    self.config_manager.write_to_log(display_name, log_content)
+                    self.config_manager.write_to_log(display_name, f"=== FIN DE INSTALACIÓN ===\n")
+
+                if process.returncode != 0:
+                    error_msg = f"Error durante la instalación. Código: {process.returncode}"
+                    if self.config_manager:
+                        self.config_manager.write_to_log(display_name, f"ERROR: {error_msg}")
                     raise subprocess.CalledProcessError(
-                        result.returncode, cmd, error_msg
+                        process.returncode, cmd, error_msg
                     )
 
                 self.progress.emit(idx, f"{display_name}: Finalizado ✅")
+                
             except Exception as e:
+                if self.config_manager:
+                    self.config_manager.write_to_log(display_name, f"ERROR DURANTE INSTALACIÓN: {str(e)}")
                 self.error.emit(f"Error instalando {display_name}:\n{str(e)}")
                 break
+            finally:
+                # Eliminar archivo temporal
+                try:
+                    os.unlink(temp_log_path)
+                except:
+                    pass
 
         self.finished.emit()
 
@@ -748,6 +797,11 @@ class ConfigDialog(QDialog):
         self.theme_combo.setCurrentText("Oscuro" if current_theme == "dark" else "Claro")
         layout.addRow("Tema de la interfaz:", self.theme_combo)
 
+        # Opción para modo silencioso por defecto
+        self.silent_checkbox = QCheckBox("Instalación silenciosa por defecto (winetricks)")
+        self.silent_checkbox.setChecked(self.config_manager.get_silent_install())
+        layout.addRow(self.silent_checkbox)
+
         self.save_settings_btn = QPushButton("Guardar Ajustes")
         self.save_settings_btn.setAutoDefault(False)
         self.save_settings_btn.clicked.connect(self.save_settings)
@@ -762,6 +816,10 @@ class ConfigDialog(QDialog):
             
             theme = "dark" if self.theme_combo.currentText() == "Oscuro" else "light"
             self.config_manager.set_theme(theme)
+            
+            # Guardar preferencia de instalación silenciosa
+            self.config_manager.set_silent_install(self.silent_checkbox.isChecked())
+            
             QMessageBox.information(self, "Guardado", "Ajustes guardados correctamente")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error al guardar ajustes: {str(e)}")
@@ -864,12 +922,15 @@ class ConfigDialog(QDialog):
         ]
 
         if config['type'] == 'proton':
-            info.append(f"<b>Wine en Proton:</b> <span style='color: #2a82da; font-weight: bold;'>{wine_version_in_proton}</span>")
-            info.append(f"<b>Directorio Proton:</b> {config.get('proton_dir', 'No especificado')}")
+            info.extend([
+                f"<b>Wine en Proton:</b> <span style='color: #2a82da; font-weight: bold;'>{wine_version_in_proton}</span>",
+                f"<b>Directorio Proton:</b> {config.get('proton_dir', 'No especificado')}"
+            ])
         else:
-            info.append(f"<b>Versión Wine:</b> <span style='color: #2a82da; font-weight: bold;'>{version}</span>")
             wine_dir = config.get('wine_dir', 'Sistema')
-            info.append(f"<b>Directorio Wine:</b> {wine_dir}")
+            info.extend([
+                f"<b>Directorio Wine:</b> {wine_dir}"
+            ])
 
         info.extend([
             f"<b>Arquitectura:</b> {config.get('arch', 'win64')}",
@@ -1379,7 +1440,7 @@ class InstallerApp(QWidget):
         self.selected_components = []
         self.custom_programs = []
         self.custom_program_types = []
-        self.silent_mode = False
+        self.silent_mode = self.config_manager.get_silent_install()
 
         self.setup_ui()
         self.apply_theme()
@@ -1463,6 +1524,8 @@ class InstallerApp(QWidget):
         options_group = QGroupBox("Opciones de Instalación")
         options_layout = QVBoxLayout()
         self.silent_checkbox = QCheckBox("Modo silencioso (solo para winetricks)")
+        self.silent_checkbox.setChecked(self.silent_mode)
+        self.silent_checkbox.stateChanged.connect(self.update_silent_mode)
         options_layout.addWidget(self.silent_checkbox)
         options_group.setLayout(options_layout)
         action_layout.addWidget(options_group)
@@ -1657,16 +1720,15 @@ class InstallerApp(QWidget):
         type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
         self.items_table.setItem(row, 2, type_item)
         
-        # Comando (nueva columna)
-        command_item = QTableWidgetItem(command if command else name)
-        command_item.setFlags(command_item.flags() & ~Qt.ItemIsEditable)
-        self.items_table.setItem(row, 3, command_item)
-        
         # Estado
         status_item = QTableWidgetItem(status)
         status_item.setFlags(status_item.flags() & ~Qt.ItemIsEditable)
-        self.items_table.setItem(row, 4, status_item)
+        self.items_table.setItem(row, 3, status_item)
     
+    def update_silent_mode(self, state):
+        self.silent_mode = state == Qt.Checked
+        self.config_manager.set_silent_install(self.silent_mode)
+
     def load_custom_programs(self):
         dialog = LoadProgramsDialog(self.config_manager, self)
         if dialog.exec_() == QDialog.Accepted:
@@ -1801,10 +1863,19 @@ class InstallerApp(QWidget):
             self.update_install_button()
 
     def clear_list(self):
+        # Limpiar la lista como antes
         self.items_table.setRowCount(0)
         self.selected_components = []
         self.custom_programs = []
         self.custom_program_types = []
+        
+        # Restablecer los botones a su estado normal
+        self.install_btn.setEnabled(False)
+        self.add_custom_btn.setEnabled(True)
+        self.load_custom_btn.setEnabled(True)
+        self.select_components_btn.setEnabled(True)
+        
+        # Actualizar estado del botón de instalación
         self.update_install_button()
 
     def remove_selected(self):
@@ -1938,7 +2009,6 @@ class InstallerApp(QWidget):
                 return
 
         env = self.config_manager.get_current_env(current_config)
-        self.silent_mode = self.silent_checkbox.isChecked()
         
         all_items = []
         all_types = []
@@ -1968,8 +2038,10 @@ class InstallerApp(QWidget):
                 env,
                 item_types=all_types,
                 silent_mode=self.silent_mode,
-                winetricks_path=self.config_manager.get_winetricks_path()
+                winetricks_path=self.config_manager.get_winetricks_path(),
+                config_manager=self.config_manager
             )
+            self.installer_thread.progress.connect(self.update_progress)
             self.installer_thread.finished.connect(self.installation_finished)
             self.installer_thread.error.connect(self.show_error)
 
@@ -1977,19 +2049,33 @@ class InstallerApp(QWidget):
             self.cancel_btn.setEnabled(True)
             self.installer_thread.start()
 
+    def update_progress(self, idx, message):
+        self.items_table.item(idx, 3).setText(message)
+
     def installation_finished(self):
-        QMessageBox.information(self, "Completado", "Todos los items se instalaron correctamente.")
-        self.clear_list()
-        self.reset_ui()
+        # Mostrar mensaje de completado pero NO limpiar la lista
+        QMessageBox.information(self, "Completado", "Instalación finalizada. Limpie la lista para instalar nuevos programas.")
+        
+        # Deshabilitar botones relevantes
+        self.install_btn.setEnabled(False)
+        self.add_custom_btn.setEnabled(False)
+        self.load_custom_btn.setEnabled(False)
+        self.select_components_btn.setEnabled(False)
+        
+        # Habilitar solo el botón de limpiar
+        self.cancel_btn.setEnabled(False)
 
     def reset_ui(self):
+        # Solo deshabilitar los botones de instalación/cancelación
         self.install_btn.setEnabled(False)
         self.cancel_btn.setEnabled(False)
-        self.silent_checkbox.setChecked(False)
+        # No cambiar el estado de los otros botones aquí
 
     def show_error(self, message):
         QMessageBox.critical(self, "Error", message)
-        self.reset_ui()
+        # Solo resetear la UI parcialmente
+        self.install_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(False)
 
     def cancel_installation(self):
         if self.installer_thread and self.installer_thread.isRunning():
