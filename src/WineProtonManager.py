@@ -5,6 +5,8 @@ import subprocess
 import json
 import re
 import time
+import tempfile
+
 from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
