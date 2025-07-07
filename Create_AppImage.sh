@@ -38,11 +38,11 @@ cp dist/WineProtonManager AppDir/usr/bin/
 
 # Asegurarse de tener icono y desktop file
 if [ ! -f "icons/WineProtonManager.png" ]; then
-  echo "Advertencia: No se encontró icons/WineProtonManager.png"
+  echo "Advertencia: No se encontrÃ³ icons/WineProtonManager.png"
 fi
 
 if [ ! -f "AppDir/WineProtonManager.desktop" ]; then
-  echo "Advertencia: No se encontró AppDir/WineProtonManager.desktop"
+  echo "Advertencia: No se encontrÃ³ AppDir/WineProtonManager.desktop"
 fi
 
 # Construir AppImage
@@ -50,5 +50,5 @@ fi
 ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir
 
 echo ""
-echo "? Construcción completa. Para ejecutar:"
-echo "./WineProtonManager-v1.1.0-x86_64.AppImage"
+echo "? ConstrucciÃ³n completa. Para ejecutar:"
+echo "./WineProtonManager-v1.2.0-x86_64.AppImage"
