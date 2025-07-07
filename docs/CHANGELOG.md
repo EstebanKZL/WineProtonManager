@@ -31,11 +31,11 @@
 - **Fijo**: Limpieza de procesos residuales
 
 ### Notas de Actualización
-```bash
-# Recomendaciones post-actualización:
-1. Verificar permisos en ~/.config/WineProtonManager/logs/
-2. Los logs antiguos mantienen su formato original
-3. El modo silencioso ahora aplica consistentemente
+    ```bash
+    # Recomendaciones post-actualización:
+    1. Verificar permisos en ~/.config/WineProtonManager/logs/
+    2. Los logs antiguos mantienen su formato original
+    3. El modo silencioso ahora aplica consistentemente
 
 ## [v1.0.0] - 2025-07-05 🎉
 ### Added
