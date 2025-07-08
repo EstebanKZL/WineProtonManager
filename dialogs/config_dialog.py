@@ -24,6 +24,7 @@ from PyQt5.QtGui import QIcon, QPalette, QColor, QFont, QDesktopServices
 from dialogs.repository_dialog import RepositoryDialog
 from downloader import DownloadThread
 from config_manager import ConfigManager
+from downloader import DecompressThread
 from styles import STEAM_DECK_STYLE
 
 class ConfigDialog(QDialog):
@@ -547,26 +548,11 @@ class ConfigDialog(QDialog):
     def on_download_finished(self, filepath, name):
         self.progress_dialog.setLabelText(f"Descomprimiendo {name}...")
         self.progress_dialog.setMaximum(0)  # Modo indeterminado durante descompresión
-        
-        try:
-            # Llamar a la lógica de descompresión (sin eliminar archivos descomprimidos)
-            if self.config_manager.decompress_archive(filepath):
-                # Opcional: Eliminar SOLO el archivo comprimido después de descomprimir exitosamente
-                # Si quieres mantener incluso el archivo comprimido, comenta o elimina este bloque
-                try:
-                    Path(filepath).unlink()
-                    print(f"Archivo comprimido eliminado: {filepath}")
-                except Exception as e:
-                    print(f"No se pudo eliminar el archivo comprimido {filepath}: {e}")
-                    # No es crítico si falla, seguimos adelante
-                
-                QMessageBox.information(self, "Éxito", f"Descarga y descompresión completadas:\n{name}")
-            else:
-                QMessageBox.critical(self, "Error", f"Error al descomprimir {name}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Excepción durante descompresión:\n{str(e)}")
-        finally:
-            self.progress_dialog.close()
+
+        self.decompress_thread = DecompressThread(filepath, self.config_manager)
+        self.decompress_thread.finished.connect(lambda path: self.on_decompress_finished(path, name))
+        self.decompress_thread.error.connect(self.show_decompress_error)
+        self.decompress_thread.start()
 
     def show_decompress_error(self, error_msg):
         self.progress_dialog.close()
@@ -577,18 +563,13 @@ class ConfigDialog(QDialog):
         except Exception:
             pass
 
-    def on_decompress_finished(self, filepath, name):
+    def on_decompress_finished(self, path, name):
         self.progress_dialog.close()
         QMessageBox.information(self, "Éxito", f"Descarga y descompresión completadas:\n{name}")
-        # Eliminar el archivo comprimido después de descomprimir
-        try:
-            Path(filepath).unlink()
-        except Exception as e:
-            print(f"No se pudo eliminar el archivo {filepath}: {e}")
 
-    def on_decompress_error(self, error):
+    def show_decompress_error(self, error_msg):
         self.progress_dialog.close()
-        QMessageBox.warning(self, "Error", f"Error al descomprimir:\n{error}")
+        QMessageBox.critical(self, "Error de descompresión", error_msg)
 
     def save_new_config(self):
         try:
