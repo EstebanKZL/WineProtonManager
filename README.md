@@ -39,7 +39,7 @@
     pip install -r requirements.txt
     
     # Ejecutar
-    python3 src/WineProtonManager.py
+    python3 main.py
     
     Consulta el archivo [INSTALL.md](docs/INSTALL.md) para instrucciones detalladas.
 
