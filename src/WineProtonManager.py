@@ -552,80 +552,6 @@ class ConfigManager:
                 return True
         return False
 
-    def decompress_archive(self, archive_path):
-        """Descomprime archivos directamente en carpeta con nombre del archivo"""
-        path = Path(archive_path)
-        
-        try:
-            # Determinar directorio base (Wine o Proton)
-            base_dir = self.wine_download_dir if "wine" in path.name.lower() else self.proton_download_dir
-            
-            # Obtener nombre de carpeta destino (nombre archivo sin extensiones)
-            folder_name = path.stem
-            while path.suffix:
-                path = Path(path.stem)  # Quitar extensiones múltiples (.tar.gz)
-                folder_name = path.stem
-            
-            target_dir = base_dir / folder_name
-            
-            # Crear directorio temporal seguro
-            with tempfile.TemporaryDirectory(prefix="wpm_") as temp_dir:
-                temp_dir = Path(temp_dir)
-                
-                # Descompresión según formato
-                if str(archive_path).endswith(('.tar.gz', '.tgz')):
-                    with tarfile.open(str(archive_path), "r:gz") as tar:
-                        tar.extractall(path=str(temp_dir))
-                        
-                elif str(archive_path).endswith(('.tar.xz', '.txz')):
-                    try:
-                        with tarfile.open(str(archive_path), "r:xz") as tar:
-                            tar.extractall(path=str(temp_dir))
-                    except ImportError:
-                        subprocess.run(
-                            ["tar", "-xJf", str(archive_path), "-C", str(temp_dir)],
-                            check=True,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE
-                        )
-                        
-                elif str(archive_path).endswith('.zip'):
-                    with zipfile.ZipFile(str(archive_path), 'r') as zip_ref:
-                        zip_ref.extractall(str(temp_dir))
-                        
-                else:
-                    raise ValueError(f"Formato no soportado: {archive_path}")
-    
-                # Mover contenido al directorio final
-                contents = list(temp_dir.iterdir())
-                
-                # Caso 1: El archivo creó una carpeta con el mismo nombre
-                if len(contents) == 1 and contents[0].name == folder_name:
-                    shutil.move(str(contents[0]), str(target_dir))
-                
-                # Caso 2: Contenido directo
-                else:
-                    target_dir.mkdir(parents=True, exist_ok=True)
-                    for item in contents:
-                        shutil.move(str(item), str(target_dir / item.name))
-    
-            # Asignar permisos 775 recursivamente
-            for root, dirs, files in os.walk(str(target_dir)):
-                for d in dirs:
-                    os.chmod(Path(root) / d, 0o775)
-                for f in files:
-                    os.chmod(Path(root) / f, 0o775)
-    
-            # Eliminar archivo comprimido tras éxito
-            Path(archive_path).unlink(missing_ok=True)
-            return True
-            
-        except Exception as e:
-            print(f"Error al descomprimir {archive_path}: {str(e)}")
-            # Limpiar en caso de error
-            shutil.rmtree(str(target_dir), ignore_errors=True)
-            return False
-
 class DownloadThread(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal(str)
@@ -1342,23 +1268,11 @@ class ConfigDialog(QDialog):
     def on_download_finished(self, filepath, name):
         self.progress_dialog.setLabelText(f"Descomprimiendo {name}...")
         self.progress_dialog.setMaximum(0)  # Modo indeterminado durante descompresión
-        
-        try:
-            # Llamar a la nueva lógica de descompresión
-            if self.config_manager.decompress_archive(filepath):
-                # Eliminar el archivo comprimido después de descomprimir
-                try:
-                    Path(filepath).unlink()
-                except Exception as e:
-                    print(f"No se pudo eliminar {filepath}: {e}")
-                
-                QMessageBox.information(self, "Éxito", f"Descarga y descompresión completadas:\n{name}")
-            else:
-                QMessageBox.critical(self, "Error", f"Error al descomprimir {name}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Excepción durante descompresión:\n{str(e)}")
-        finally:
-            self.progress_dialog.close()
+
+        self.decompress_thread = DecompressThread(filepath, self.config_manager)
+        self.decompress_thread.finished.connect(lambda path: self.on_decompress_finished(path, name))
+        self.decompress_thread.error.connect(self.show_decompress_error)
+        self.decompress_thread.start()
 
     def show_decompress_error(self, error_msg):
         self.progress_dialog.close()
@@ -1369,18 +1283,13 @@ class ConfigDialog(QDialog):
         except Exception:
             pass
 
-    def on_decompress_finished(self, filepath, name):
+    def on_decompress_finished(self, path, name):
         self.progress_dialog.close()
         QMessageBox.information(self, "Éxito", f"Descarga y descompresión completadas:\n{name}")
-        # Eliminar el archivo comprimido después de descomprimir
-        try:
-            Path(filepath).unlink()
-        except Exception as e:
-            print(f"No se pudo eliminar el archivo {filepath}: {e}")
 
-    def on_decompress_error(self, error):
+    def show_decompress_error(self, error_msg):
         self.progress_dialog.close()
-        QMessageBox.warning(self, "Error", f"Error al descomprimir:\n{error}")
+        QMessageBox.critical(self, "Error de descompresión", error_msg)
 
     def save_new_config(self):
         try:
@@ -1705,84 +1614,114 @@ class ConfigDialog(QDialog):
         return env
         
 class DecompressThread(QThread):
-    finished = pyqtSignal()
+    finished = pyqtSignal(str)  # Emitir la ruta del directorio descomprimido
     error = pyqtSignal(str)
-    
+    progress = pyqtSignal(int)  # Para mostrar progreso si es necesario
+
     def __init__(self, archive_path, config_manager):
         super().__init__()
-        self.archive_path = archive_path
+        self.archive_path = Path(archive_path)
         self.config_manager = config_manager
         self._is_running = True
-        
+        self.target_dir = None
+
+    def set_permissions(self, path):
+        """Función recursiva para establecer permisos"""
+        try:
+            if path.is_dir():
+                os.chmod(path, 0o775)  # Permisos para directorios
+                for item in path.iterdir():
+                    self.set_permissions(item)
+            else:
+                os.chmod(path, 0o775)  # Permisos para archivos
+        except Exception as e:
+            print(f"Error al establecer permisos en {path}: {e}")
+
     def run(self):
         try:
-            path = Path(self.archive_path)
-            if not path.exists():
-                raise FileNotFoundError(f"El archivo {path} no existe")
-                
-            dest_dir = path.parent
-            
-            # Verificar espacio en disco antes de descomprimir (aproximadamente 3x el tamaño del archivo)
+            if not self.archive_path.exists():
+                raise FileNotFoundError(f"El archivo {self.archive_path} no existe")
+
+            dest_dir = self.archive_path.parent
+
+            # Verificar espacio en disco
             stat = os.statvfs(dest_dir)
             free_space = stat.f_frsize * stat.f_bavail
-            archive_size = path.stat().st_size
+            archive_size = self.archive_path.stat().st_size
             required_space = archive_size * 3
-            
+
             if free_space < required_space:
                 raise Exception(f"No hay suficiente espacio en disco. Se necesitan al menos {required_space/1024/1024:.1f} MB")
-            
-            # Mostrar progreso para archivos grandes
-            if path.suffixes == ['.tar', '.gz'] or path.suffix == '.tgz':
-                with tarfile.open(path, "r:gz") as tar:
-                    members = tar.getmembers()
-                    total = len(members)
-                    for i, member in enumerate(members, 1):
-                        if not self._is_running:
-                            self.clean_partial_extraction(dest_dir, members[:i])
-                            return
-                        tar.extract(member, path=dest_dir)
-            
-            elif path.suffixes == ['.tar', '.xz'] or path.suffix == '.txz':
-                with tarfile.open(path, "r:xz") as tar:
-                    members = tar.getmembers()
-                    total = len(members)
-                    for i, member in enumerate(members, 1):
-                        if not self._is_running:
-                            self.clean_partial_extraction(dest_dir, members[:i])
-                            return
-                        tar.extract(member, path=dest_dir)
-            
-            elif path.suffix == '.zip':
-                with zipfile.ZipFile(path, 'r') as zip_ref:
-                    file_list = zip_ref.infolist()
-                    total = len(file_list)
-                    for i, file_info in enumerate(file_list, 1):
-                        if not self._is_running:
-                            self.clean_partial_extraction(dest_dir, file_list[:i])
-                            return
-                        zip_ref.extract(file_info, dest_dir)
-            
-            else:
-                raise ValueError(f"Formato no soportado: {path}")
-                
-            self.finished.emit()
-            
-        except Exception as e:
-            self.error.emit(f"Error al descomprimir {self.archive_path}: {str(e)}")
-            
-    def clean_partial_extraction(self, dest_dir, extracted_items):
-        """Elimina archivos extraídos parcialmente si se cancela la operación"""
-        try:
-            for item in extracted_items:
-                item_path = Path(dest_dir) / item.name
-                if item_path.exists():
-                    if item_path.is_dir():
-                        shutil.rmtree(item_path)
+
+            # Extraer base name
+            base_name = self.archive_path.stem
+            tmp_path = self.archive_path
+            while tmp_path.suffix:
+                tmp_path = tmp_path.with_suffix("")
+                base_name = tmp_path.name
+
+            with tempfile.TemporaryDirectory(prefix="wpm_") as temp_dir:
+                temp_dir = Path(temp_dir)
+
+                # Descomprimir en tmp
+                if self.archive_path.suffixes[-2:] == ['.tar', '.gz'] or self.archive_path.suffix == '.tgz':
+                    with tarfile.open(self.archive_path, "r:gz") as tar:
+                        tar.extractall(path=temp_dir, filter='data')
+                elif self.archive_path.suffixes[-2:] == ['.tar', '.xz'] or self.archive_path.suffix == '.txz':
+                    with tarfile.open(self.archive_path, "r:xz") as tar:
+                        tar.extractall(path=temp_dir, filter='data')
+                elif self.archive_path.suffix == '.zip':
+                    with zipfile.ZipFile(self.archive_path, 'r') as zip_ref:
+                        zip_ref.extractall(temp_dir)
+                else:
+                    file_output = subprocess.run(["file", "-b", str(self.archive_path)],
+                                              capture_output=True, text=True).stdout
+                    if 'XZ compressed data' in file_output:
+                        with tarfile.open(self.archive_path, "r:xz") as tar:
+                            tar.extractall(path=temp_dir, filter='data')
                     else:
-                        item_path.unlink()
+                        raise ValueError(f"Formato no soportado: {self.archive_path}")
+
+                # Establecer permisos en el directorio temporal ANTES de mover
+                self.set_permissions(temp_dir)
+
+                # Mover contenido al destino final
+                contents = list(temp_dir.iterdir())
+                if len(contents) == 1 and contents[0].is_dir():
+                    self.target_dir = dest_dir / contents[0].name
+                    if self.target_dir.exists():
+                        shutil.rmtree(self.target_dir)
+                    shutil.move(str(contents[0]), str(self.target_dir))
+                else:
+                    self.target_dir = dest_dir / base_name
+                    if self.target_dir.exists():
+                        shutil.rmtree(self.target_dir)
+                    self.target_dir.mkdir(parents=True, exist_ok=True)
+                    for item in contents:
+                        shutil.move(str(item), str(self.target_dir / item.name))
+
+                # Establecer permisos nuevamente en el destino final por seguridad
+                self.set_permissions(self.target_dir)
+
+            # Eliminar archivo comprimido si existe
+            try:
+                if self.archive_path.exists():
+                    self.archive_path.unlink()
+            except Exception as e:
+                print(f"No se pudo eliminar archivo comprimido: {e}")
+
+            self.finished.emit(str(self.target_dir))
+
         except Exception as e:
-            print(f"Error al limpiar extracción parcial: {e}")
-            
+            # Limpieza en caso de error
+            try:
+                if self.target_dir and self.target_dir.exists():
+                    shutil.rmtree(self.target_dir, ignore_errors=True)
+            except Exception as cleanup_error:
+                print(f"Error al limpiar: {cleanup_error}")
+
+            self.error.emit(f"Error al descomprimir {self.archive_path}: {str(e)}")
+
     def stop(self):
         self._is_running = False
             
