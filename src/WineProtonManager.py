@@ -803,7 +803,7 @@ class InstallerThread(QThread):
                 with open(log_file, 'a', encoding='utf-8') as f:
                     f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} installed {display_name}\n")
 
-                self.progress.emit(idx, f"{display_name}: Finalizado ✅")
+                self.progress.emit(idx, f"{display_name}: Finalizado")
                 
             except Exception as e:
                 if self.config_manager:
@@ -2318,7 +2318,7 @@ class InstallerApp(QWidget):
         
         self.items_table = QTableWidget()
         self.items_table.setColumnCount(4)
-        self.items_table.setHorizontalHeaderLabels(["", "Nombre", "Tipo", "Estado"])
+        self.items_table.setHorizontalHeaderLabels(["Acciones", "Nombre", "Tipo", "Estado"])
         self.items_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.items_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.items_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
