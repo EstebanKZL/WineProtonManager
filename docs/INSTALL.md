@@ -13,7 +13,6 @@ Ejecutar aplicación
 
 1. Clona el repositorio:
    ```bash
-   sudo apt update && apt upgrade -y
    sudo apt install wine winetricks konsole kdialog libssl3
    git clone https://github.com/EstebanKZL/WineProtonManager.git
    cd WineProtonManager
@@ -33,7 +32,6 @@ Creación de AppImage
 1. Instala linuxdeployqt y AppImage:
 
    ```bash
-   sudo apt update && apt upgrade -y
    sudo apt install wine winetricks konsole kdialog libssl3
    git clone https://github.com/EstebanKZL/WineProtonManager.git
    cd WineProtonManager
