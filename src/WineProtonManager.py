@@ -553,78 +553,77 @@ class ConfigManager:
         return False
 
     def decompress_archive(self, archive_path):
-        """Descomprime un archivo en su directorio con manejo de errores mejorado"""
+        """Descomprime archivos directamente en carpeta con nombre del archivo"""
         path = Path(archive_path)
-        dest_dir = path.parent
         
         try:
-            # Extraer el nombre base sin extensiones para crear el directorio de destino
-            base_name = path.name
-            while '.' in base_name:
-                base_name = base_name.rsplit('.', 1)[0]
+            # Determinar directorio base (Wine o Proton)
+            base_dir = self.wine_download_dir if "wine" in path.name.lower() else self.proton_download_dir
             
-            target_dir = dest_dir / base_name
+            # Obtener nombre de carpeta destino (nombre archivo sin extensiones)
+            folder_name = path.stem
+            while path.suffix:
+                path = Path(path.stem)  # Quitar extensiones múltiples (.tar.gz)
+                folder_name = path.stem
             
-            # Eliminar directorio existente si es necesario
-            if target_dir.exists():
-                shutil.rmtree(target_dir, ignore_errors=True)
-                time.sleep(0.5)  # Pequeño retraso para asegurar la eliminación
+            target_dir = base_dir / folder_name
             
-            # Crear directorio de destino
-            target_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Verificación robusta de formatos que ignora cualquier cosa antes de las extensiones reales
-            if path.name.endswith(('.tar.gz', '.tgz')):
-                # .tar.gz
-                with tarfile.open(path, "r:gz") as tar:
-                    tar.extractall(path=target_dir)
-            elif path.name.endswith(('.tar.xz', '.txz')):
-                # .tar.xz
-                try:
-                    # Intento con Python si lzma está disponible
-                    import lzma
-                    with tarfile.open(path, "r:xz") as tar:
-                        tar.extractall(path=target_dir)
-                except ImportError:
-                    # Fallback al comando tar del sistema
-                    print("Usando comando tar del sistema para .tar.xz")
-                    result = subprocess.run(
-                        ["tar", "-xJf", str(path), "-C", str(target_dir)],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE
-                    )
-                    if result.returncode != 0:
-                        print(f"Error con tar: {result.stderr.decode()}")
-                        raise Exception(f"Error con tar: {result.stderr.decode()}")
-            elif path.suffix == '.zip' or path.name.endswith('.zip'):
-                # .zip
-                with zipfile.ZipFile(path, 'r') as zip_ref:
-                    zip_ref.extractall(target_dir)
-            else:
-                # Último intento: ver si es un archivo tar.xz por contenido
-                file_output = subprocess.run(["file", "-b", str(path)], 
-                                            capture_output=True, text=True).stdout
-                if 'XZ compressed data' in file_output:
-                    return self.decompress_archive(archive_path)  # Recursión forzada
-                print(f"Formato no soportado: {path}")
-                return False
-            
-            # Asignar permisos adecuados
-            for root, dirs, files in os.walk(target_dir):
+            # Crear directorio temporal seguro
+            with tempfile.TemporaryDirectory(prefix="wpm_") as temp_dir:
+                temp_dir = Path(temp_dir)
+                
+                # Descompresión según formato
+                if str(archive_path).endswith(('.tar.gz', '.tgz')):
+                    with tarfile.open(str(archive_path), "r:gz") as tar:
+                        tar.extractall(path=str(temp_dir))
+                        
+                elif str(archive_path).endswith(('.tar.xz', '.txz')):
+                    try:
+                        with tarfile.open(str(archive_path), "r:xz") as tar:
+                            tar.extractall(path=str(temp_dir))
+                    except ImportError:
+                        subprocess.run(
+                            ["tar", "-xJf", str(archive_path), "-C", str(temp_dir)],
+                            check=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE
+                        )
+                        
+                elif str(archive_path).endswith('.zip'):
+                    with zipfile.ZipFile(str(archive_path), 'r') as zip_ref:
+                        zip_ref.extractall(str(temp_dir))
+                        
+                else:
+                    raise ValueError(f"Formato no soportado: {archive_path}")
+    
+                # Mover contenido al directorio final
+                contents = list(temp_dir.iterdir())
+                
+                # Caso 1: El archivo creó una carpeta con el mismo nombre
+                if len(contents) == 1 and contents[0].name == folder_name:
+                    shutil.move(str(contents[0]), str(target_dir))
+                
+                # Caso 2: Contenido directo
+                else:
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    for item in contents:
+                        shutil.move(str(item), str(target_dir / item.name))
+    
+            # Asignar permisos 775 recursivamente
+            for root, dirs, files in os.walk(str(target_dir)):
                 for d in dirs:
-                    os.chmod(os.path.join(root, d), 0o755)
+                    os.chmod(Path(root) / d, 0o775)
                 for f in files:
-                    os.chmod(os.path.join(root, f), 0o644)
-            
+                    os.chmod(Path(root) / f, 0o775)
+    
+            # Eliminar archivo comprimido tras éxito
+            Path(archive_path).unlink(missing_ok=True)
             return True
+            
         except Exception as e:
-            print(f"Error al descomprimir {path}: {e}")
-            # Intentar limpiar la extracción parcial
-            try:
-                if target_dir.exists():
-                    shutil.rmtree(target_dir, ignore_errors=True)
-            except:
-                pass
+            print(f"Error al descomprimir {archive_path}: {str(e)}")
+            # Limpiar en caso de error
+            shutil.rmtree(str(target_dir), ignore_errors=True)
             return False
 
 class DownloadThread(QThread):
