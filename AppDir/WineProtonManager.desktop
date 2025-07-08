@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=WineProtonManager-v1.2.0
-Exec=WineProtonManager
+Name=WineProtonManager-v1.3.0
+Exec=main
 Icon=WineProtonManager
 Categories=Utility;
 Comment=Herramienta GUI para gestionar entornos Wine/Proton
