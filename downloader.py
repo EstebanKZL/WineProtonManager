@@ -86,61 +86,107 @@ class DecompressThread(QThread):
         self.config_manager = config_manager
         self._is_running = True
         
-    def run(self):
-        try:
-            path = Path(self.archive_path)
-            if not path.exists():
-                raise FileNotFoundError(f"El archivo {path} no existe")
-                
-            dest_dir = path.parent
+def run(self):
+    try:
+        path = Path(self.archive_path)
+        if not path.exists():
+            raise FileNotFoundError(f"El archivo {path} no existe")
+
+        # Determinar directorio base (Wine o Proton)
+        base_dir = self.wine_download_dir if "wine" in path.name.lower() else self.proton_download_dir
+        
+        # Obtener nombre de carpeta destino (nombre archivo sin extensiones)
+        folder_name = path.stem
+        while path.suffix:
+            path = Path(path.stem)  # Quitar extensiones múltiples (.tar.gz)
+            folder_name = path.stem
+        
+        target_dir = base_dir / folder_name
+
+        # Verificar espacio en disco antes de descomprimir (aproximadamente 3x el tamaño del archivo)
+        stat = os.statvfs(str(base_dir))
+        free_space = stat.f_frsize * stat.f_bavail
+        archive_size = Path(self.archive_path).stat().st_size
+        required_space = archive_size * 3
+        
+        if free_space < required_space:
+            raise Exception(f"No hay suficiente espacio en disco. Se necesitan al menos {required_space/1024/1024:.1f} MB")
+
+        # Crear directorio temporal seguro
+        with tempfile.TemporaryDirectory(prefix="wpm_") as temp_dir:
+            temp_dir = Path(temp_dir)
             
-            # Verificar espacio en disco antes de descomprimir (aproximadamente 3x el tamaño del archivo)
-            stat = os.statvfs(dest_dir)
-            free_space = stat.f_frsize * stat.f_bavail
-            archive_size = path.stat().st_size
-            required_space = archive_size * 3
-            
-            if free_space < required_space:
-                raise Exception(f"No hay suficiente espacio en disco. Se necesitan al menos {required_space/1024/1024:.1f} MB")
-            
-            # Mostrar progreso para archivos grandes
-            if path.suffixes == ['.tar', '.gz'] or path.suffix == '.tgz':
-                with tarfile.open(path, "r:gz") as tar:
+            # Descompresión según formato con progreso
+            if str(self.archive_path).endswith(('.tar.gz', '.tgz')):
+                with tarfile.open(str(self.archive_path), "r:gz") as tar:
                     members = tar.getmembers()
                     total = len(members)
                     for i, member in enumerate(members, 1):
                         if not self._is_running:
-                            self.clean_partial_extraction(dest_dir, members[:i])
+                            self.clean_partial_extraction(temp_dir, members[:i])
                             return
-                        tar.extract(member, path=dest_dir)
-            
-            elif path.suffixes == ['.tar', '.xz'] or path.suffix == '.txz':
-                with tarfile.open(path, "r:xz") as tar:
-                    members = tar.getmembers()
-                    total = len(members)
-                    for i, member in enumerate(members, 1):
-                        if not self._is_running:
-                            self.clean_partial_extraction(dest_dir, members[:i])
-                            return
-                        tar.extract(member, path=dest_dir)
-            
-            elif path.suffix == '.zip':
-                with zipfile.ZipFile(path, 'r') as zip_ref:
+                        tar.extract(member, path=str(temp_dir))
+                        
+            elif str(self.archive_path).endswith(('.tar.xz', '.txz')):
+                try:
+                    with tarfile.open(str(self.archive_path), "r:xz") as tar:
+                        members = tar.getmembers()
+                        total = len(members)
+                        for i, member in enumerate(members, 1):
+                            if not self._is_running:
+                                self.clean_partial_extraction(temp_dir, members[:i])
+                                return
+                            tar.extract(member, path=str(temp_dir))
+                except ImportError:
+                    # Alternativa con subprocess si no hay soporte para xz
+                    subprocess.run(
+                        ["tar", "-xJf", str(self.archive_path), "-C", str(temp_dir)],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
+                    
+            elif str(self.archive_path).endswith('.zip'):
+                with zipfile.ZipFile(str(self.archive_path), 'r') as zip_ref:
                     file_list = zip_ref.infolist()
                     total = len(file_list)
                     for i, file_info in enumerate(file_list, 1):
                         if not self._is_running:
-                            self.clean_partial_extraction(dest_dir, file_list[:i])
+                            self.clean_partial_extraction(temp_dir, file_list[:i])
                             return
-                        zip_ref.extract(file_info, dest_dir)
-            
+                        zip_ref.extract(file_info, str(temp_dir))
+                    
             else:
-                raise ValueError(f"Formato no soportado: {path}")
-                
-            self.finished.emit()
+                raise ValueError(f"Formato no soportado: {self.archive_path}")
+
+            # Mover contenido al directorio final
+            contents = list(temp_dir.iterdir())
             
-        except Exception as e:
-            self.error.emit(f"Error al descomprimir {self.archive_path}: {str(e)}")
+            # Caso 1: El archivo creó una carpeta con el mismo nombre
+            if len(contents) == 1 and contents[0].name == folder_name:
+                shutil.move(str(contents[0]), str(target_dir))
+            
+            # Caso 2: Contenido directo
+            else:
+                target_dir.mkdir(parents=True, exist_ok=True)
+                for item in contents:
+                    shutil.move(str(item), str(target_dir / item.name))
+
+        # Asignar permisos 775 recursivamente
+        for root, dirs, files in os.walk(str(target_dir)):
+            for d in dirs:
+                os.chmod(Path(root) / d, 0o775)
+            for f in files:
+                os.chmod(Path(root) / f, 0o775)
+
+        # Eliminar archivo comprimido tras éxito
+        Path(self.archive_path).unlink(missing_ok=True)
+        self.finished.emit()
+        
+    except Exception as e:
+        # Limpiar en caso de error
+        shutil.rmtree(str(target_dir), ignore_errors=True)
+        self.error.emit(f"Error al descomprimir {self.archive_path}: {str(e)}")
             
     def clean_partial_extraction(self, dest_dir, extracted_items):
         """Elimina archivos extraídos parcialmente si se cancela la operación"""
