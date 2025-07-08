@@ -31,10 +31,10 @@ pyinstaller --onefile \
   --add-binary '/usr/lib/x86_64-linux-gnu/libcrypto.so.3:.' \
   --add-binary '/usr/lib/x86_64-linux-gnu/libcurl.so.4:.' \
   --add-binary '/usr/lib/x86_64-linux-gnu/libgobject-2.0.so.0:.' \
-  src/WineProtonManager.py
+  main.py
 
 # Copiar binario a AppDir
-cp dist/WineProtonManager AppDir/usr/bin/
+cp dist/main AppDir/usr/bin/
 
 # Asegurarse de tener icono y desktop file
 if [ ! -f "icons/WineProtonManager.png" ]; then
@@ -46,9 +46,9 @@ if [ ! -f "AppDir/WineProtonManager.desktop" ]; then
 fi
 
 # Construir AppImage
-./linuxdeploy-x86_64.AppImage --appdir AppDir -e dist/WineProtonManager -i icons/WineProtonManager.png -d AppDir/WineProtonManager.desktop
+./linuxdeploy-x86_64.AppImage --appdir AppDir -e dist/main -i icons/WineProtonManager.png -d AppDir/WineProtonManager.desktop
 ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir
 
 echo ""
 echo "? Construcción completa. Para ejecutar:"
-echo "./WineProtonManager-v1.2.0-x86_64.AppImage"
+echo "./WineProtonManager-v1.3.0-x86_64.AppImage"
