@@ -4,7 +4,6 @@
 set -e
 
 # Actualizar e instalar dependencias
-sudo apt update && sudo apt upgrade -y
 sudo apt install -y wine winetricks konsole kdialog libssl3 git wget
 
 # Descargar linuxdeploy y appimagetool
