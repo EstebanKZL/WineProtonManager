@@ -19,7 +19,7 @@ mkdir -p AppDir/usr/bin
 cat << 'EOF' > AppDir/AppRun
 #!/bin/bash
 HERE="$(dirname "$(readlink -f "$0")")"
-exec "$HERE/usr/bin/main "$@"
+exec "$HERE/usr/bin/main" "$@"
 EOF
 
 chmod +x AppDir/AppRun
