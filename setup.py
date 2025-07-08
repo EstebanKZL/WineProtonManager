@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="WineProtonManager",
-    version="1.2.0",
+    version="1.3.0",
     description="Herramienta GUI para gestionar entornos Wine/Proton",
     long_description=open('README.md', encoding='utf-8').read(),
     long_description_content_type='text/markdown',
@@ -16,7 +16,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'wineprotonmanager=src.wineprotonmanager:main',
+            'wineprotonmanager=wineprotonmanager:main',
         ],
     },
     include_package_data=True,
