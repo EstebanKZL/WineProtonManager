@@ -1028,7 +1028,7 @@ class ConfigDialog(QDialog):
         # Aumentamos el tamano de la fuente base para las listas.
         # Por ejemplo, si STYLE_STEAM_DECK["font"] es 10, podemos usar 12 o 13 para las listas.
         base_font_size = STYLE_STEAM_DECK["font"].pointSize()
-        list_font_size = base_font_size + 2 # Aumentar en 2 puntos, ajusta si es necesario.
+        list_font_size = base_font_size + 6 # Aumentar en 2 puntos, ajusta si es necesario.
 
         if theme == "dark":
             list_bg = COLOR_DARK_WINDOW
@@ -1633,7 +1633,7 @@ class ConfigDialog(QDialog):
         layout.addRow("Tema de Interfaz:", self.theme_combo)
 
         # Global silent install checkbox
-        self.checkbox_silent_global = QCheckBox("Habilitar modo silencioso por defecto (Winetricks)")
+        self.checkbox_silent_global = QCheckBox("Habilitar modo silencioso por defecto (-q)")
         self.checkbox_silent_global.setChecked(self.config_manager.get_silent_install())
         layout.addRow(self.checkbox_silent_global)
         
@@ -2026,7 +2026,7 @@ class SelectGroupsDialog(QDialog):
         # Estilo para QTreeWidget (fondo blanco, texto negro para mejor legibilidad de los componentes)
         base_font_size = STYLE_STEAM_DECK["font"].pointSize()
         # Increase font size for the tree widget items
-        tree_font_size = base_font_size + 2 # Adjust as needed
+        tree_font_size = base_font_size + 3 # Adjust as needed
 
         # Determine colors based on theme for the tree widget
         if theme_is_dark:
@@ -2548,7 +2548,7 @@ class InstallerApp(QWidget):
         
         options_group = QGroupBox("Opciones de Instalacion (solo para esta sesion)")
         options_layout = QVBoxLayout()
-        self.checkbox_silent_session = QCheckBox("Habilitar modo silencioso para esta instalacion (Winetricks)")
+        self.checkbox_silent_session = QCheckBox("Habilitar modo silencioso para esta instalacion Winetricks (-q)")
         self.checkbox_silent_session.setChecked(self.silent_mode) 
         self.checkbox_silent_session.stateChanged.connect(self.update_silent_mode_session)
         options_layout.addWidget(self.checkbox_silent_session)
@@ -2578,28 +2578,28 @@ class InstallerApp(QWidget):
         tools_layout = QHBoxLayout()
         
         left_column = QVBoxLayout()
-        self.btn_shell = QPushButton("Abrir Terminal")
+        self.btn_shell = QPushButton("Terminal")
         self.btn_shell.setAutoDefault(False)
         self.btn_shell.clicked.connect(self.open_shell)
         left_column.addWidget(self.btn_shell)
         
-        self.btn_prefix_folder = QPushButton("Abrir Carpeta del Prefijo")
+        self.btn_prefix_folder = QPushButton("Carpeta del Prefijo")
         self.btn_prefix_folder.setAutoDefault(False)
         self.btn_prefix_folder.clicked.connect(self.open_prefix_folder)
         left_column.addWidget(self.btn_prefix_folder)
 
         right_column = QVBoxLayout()
-        self.btn_winetricks_gui = QPushButton("Abrir Winetricks GUI")
+        self.btn_winetricks_gui = QPushButton("Winetricks GUI")
         self.btn_winetricks_gui.setAutoDefault(False)
         self.btn_winetricks_gui.clicked.connect(self.open_winetricks)
         right_column.addWidget(self.btn_winetricks_gui)
         
-        self.btn_winecfg = QPushButton("Abrir Winecfg")
+        self.btn_winecfg = QPushButton("Winecfg")
         self.btn_winecfg.setAutoDefault(False)
         self.btn_winecfg.clicked.connect(self.open_winecfg)
         right_column.addWidget(self.btn_winecfg)
         
-        self.btn_explorer = QPushButton("Abrir Explorador de Wine")
+        self.btn_explorer = QPushButton("Explorador del Prefijo")
         self.btn_explorer.setAutoDefault(False)
         self.btn_explorer.clicked.connect(self.open_explorer)
         right_column.addWidget(self.btn_explorer)
