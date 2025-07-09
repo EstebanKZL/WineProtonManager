@@ -1,50 +1,114 @@
-from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QListWidget, QLabel, QCheckBox, QDialog, QDialogButtonBox,
-    QMessageBox, QGroupBox, QComboBox, QLineEdit, QFileDialog,
-    QTabWidget, QFormLayout, QScrollArea, QListWidgetItem, QAction,
-    QMenu, QMenuBar, QTableWidget, QTableWidgetItem, QHeaderView, 
-    QTreeWidget, QTreeWidgetItem, QProgressDialog, QProgressBar
-)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QSize, QUrl
-from PyQt5.QtGui import QIcon, QPalette, QColor, QFont, QDesktopServices
-from styles import STEAM_DECK_STYLE
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QDialogButtonBox, QHeaderView, QPushButton, QLabel, QGroupBox, QApplication, QWidget
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPalette, QColor, QFont
 
+# Import the specific color constants you need directly from styles.py
+from styles import STYLE_STEAM_DECK, COLOR_PRIMARY, COLOR_ACCENT, COLOR_PRESSED, \
+                   COLOR_DISABLED_BG_LIGHT, COLOR_DISABLED_TEXT_LIGHT, COLOR_BORDER_LIGHT, \
+                   COLOR_DARK_TEXT, COLOR_DARK_WINDOW, COLOR_DARK_WINDOW_TEXT, COLOR_DARK_BASE, \
+                   COLOR_DARK_BUTTON, COLOR_DARK_BUTTON_TEXT, COLOR_DARK_HIGHLIGHT, \
+                   COLOR_DARK_HIGHLIGHT_TEXT, COLOR_DARK_BORDER, \
+                   COLOR_LIGHT_WINDOW, COLOR_LIGHT_WINDOW_TEXT, COLOR_LIGHT_BASE, \
+                   COLOR_LIGHT_TEXT, COLOR_LIGHT_BUTTON, COLOR_LIGHT_BUTTON_TEXT, \
+                   COLOR_LIGHT_HIGHLIGHT, COLOR_LIGHT_HIGHLIGHT_TEXT, COLOR_LIGHT_BORDER
+# Assuming ConfigManager is in ../config_manager.py
+from config_manager import ConfigManager # Corrected import path
 class SelectGroupsDialog(QDialog):
-    def __init__(self, component_groups, parent=None):
+    def __init__(self, component_groups: dict[str, list[str]], config_manager: ConfigManager, parent: QWidget | None = None): # Añadir config_manager
         super().__init__(parent)
         self.component_groups = component_groups
-        self.setWindowTitle("Seleccionar Componentes")
-        self.setMinimumSize(450, 350)
+        self.config_manager = config_manager # Guardar la instancia de config_manager
+        self.setWindowTitle("Seleccionar Componentes de Winetricks")
+        self.setMinimumSize(500, 450)
         self.setup_ui()
         self.apply_steamdeck_style()
 
     def apply_steamdeck_style(self):
-        self.setFont(STEAM_DECK_STYLE["font"])
-        
-        # Estilo único para ambos temas (fondo blanco, texto negro)
-        self.tree.setStyleSheet("""
-            QTreeWidget {
-                background-color: #ffffff;
-                color: black;
-            }
+        self.setFont(STYLE_STEAM_DECK["font"])
+        theme_is_dark = self.config_manager.get_theme() == "dark"
+
+        base_font_size = STYLE_STEAM_DECK["font"].pointSize()
+        tree_font_size = base_font_size + 3
+
+        if theme_is_dark:
+            # REMOVE .name() here
+            tree_bg_color = COLOR_DARK_WINDOW
+            tree_text_color = COLOR_DARK_TEXT
+            tree_border_color = COLOR_DARK_BORDER
+            tree_header_bg_color = COLOR_DARK_BUTTON
+            tree_header_text_color = COLOR_DARK_TEXT
+        else:
+            # REMOVE .name() here
+            tree_bg_color = COLOR_LIGHT_BASE
+            tree_text_color = COLOR_LIGHT_TEXT
+            tree_border_color = COLOR_LIGHT_BORDER
+            # Here, STYLE_STEAM_DECK["light_palette"]["button"] is a QColor, so .name() IS appropriate if you wanted that specific color.
+            # However, if you want it to be a direct string like the others, stick to a COLOR_ constant.
+            # I'll change it to COLOR_LIGHT_WINDOW to match the simple string pattern.
+            tree_header_bg_color = COLOR_LIGHT_WINDOW # Use a direct string constant
+            tree_header_text_color = COLOR_LIGHT_TEXT
+
+        self.tree.setStyleSheet(f"""
+            QTreeWidget {{
+                background-color: {tree_bg_color};
+                color: {tree_text_color};
+                border: 1px solid {tree_border_color};
+                font-size: {tree_font_size}px;
+            }}
+            QTreeWidget::item {{
+                padding: 4px;
+            }}
+            QTreeWidget::item:selected {{
+                background-color: {COLOR_PRIMARY};
+                color: white;
+            }}
+            QHeaderView::section {{
+                background-color: {tree_header_bg_color};
+                padding: 8px;
+                border: 1px solid {tree_border_color};
+                font-weight: bold;
+                color: {tree_header_text_color};
+            }}
         """)
 
         for widget in self.findChildren(QWidget):
-            if isinstance(widget, (QPushButton, QLabel, QComboBox, QLineEdit)):
-                widget.setFont(STEAM_DECK_STYLE["font"])
-            if isinstance(widget, QGroupBox):
-                widget.setFont(STEAM_DECK_STYLE["title_font"])
             if isinstance(widget, QPushButton):
-                widget.setStyleSheet(STEAM_DECK_STYLE["button_style"])
-                
+                widget.setStyleSheet(STYLE_STEAM_DECK["dark_button_style"] if theme_is_dark else STYLE_STEAM_DECK["button_style"])
+            elif isinstance(widget, QGroupBox):
+                widget.setFont(STYLE_STEAM_DECK["title_font"])
+                widget.setStyleSheet(STYLE_STEAM_DECK["dark_groupbox_style"] if theme_is_dark else STYLE_STEAM_DECK["groupbox_style"])
+            elif isinstance(widget, QLabel):
+                widget.setFont(STYLE_STEAM_DECK["font"])
+            
+        # Aplicar paleta para el fondo y texto general del dialogo
+        palette = QPalette()
+        if theme_is_dark:
+            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["dark_palette"]["window"])
+            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["dark_palette"]["window_text"])
+            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["dark_palette"]["base"]) # Para fondos de entrada de texto, etc.
+            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["dark_palette"]["text"])
+            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["dark_palette"]["highlight"])
+            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["dark_palette"]["highlight_text"])
+        else:
+            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["light_palette"]["window"])
+            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["light_palette"]["window_text"])
+            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["light_palette"]["base"])
+            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["light_palette"]["text"])
+            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["light_palette"]["highlight"])
+            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["light_palette"]["highlight_text"])
+        self.setPalette(palette)
+        # Forzar repintado para asegurar que los estilos se apliquen inmediatamente
+        self.repaint()
+
+
     def setup_ui(self):
         layout = QVBoxLayout()
         
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Componente", "Descripción"])
+        self.tree.setHeaderLabels(["Componente", "Descripcion"])
         self.tree.setColumnCount(2)
-        self.tree.setSelectionMode(QTreeWidget.MultiSelection)
+        self.tree.setSelectionMode(QTreeWidget.NoSelection) # Deshabilitar seleccion de fila, solo casillas
+        self.tree.itemChanged.connect(self._handle_item_change) # Conectar para manejar el estado de tres estados
         
         self.component_descriptions = {
             # Bibliotecas Visual Basic
@@ -379,7 +443,8 @@ class SelectGroupsDialog(QDialog):
         for group_name, components in self.component_groups.items():
             group_item = QTreeWidgetItem(self.tree)
             group_item.setText(0, group_name)
-            group_item.setFlags(group_item.flags() | Qt.ItemIsTristate | Qt.ItemIsUserCheckable)
+            group_item.setFlags(group_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsTristate)
+            group_item.setCheckState(0, Qt.PartiallyChecked) # Por defecto, en estado parcial
             
             for comp in components:
                 child_item = QTreeWidgetItem(group_item)
@@ -387,7 +452,7 @@ class SelectGroupsDialog(QDialog):
                 child_item.setFlags(child_item.flags() | Qt.ItemIsUserCheckable)
                 child_item.setCheckState(0, Qt.Unchecked)
                 
-                description = self.component_descriptions.get(comp, "Componente Winetricks estándar")
+                description = self.component_descriptions.get(comp, "Componente estandar de Winetricks.")
                 child_item.setText(1, description)
         
         self.tree.expandAll()
@@ -403,7 +468,35 @@ class SelectGroupsDialog(QDialog):
 
         self.setLayout(layout)
 
-    def get_selected_components(self):
+    def _handle_item_change(self, item: QTreeWidgetItem, column: int):
+        """Maneja el estado de las casillas de verificacion de los elementos del arbol (tres estados)."""
+        if item.flags() & Qt.ItemIsTristate: # Es un nodo padre (grupo)
+            # Bloquear temporalmente las senales para evitar llamadas recursivas al establecer estados de hijos
+            self.tree.blockSignals(True)
+            if item.checkState(0) == Qt.Checked:
+                for i in range(item.childCount()):
+                    item.child(i).setCheckState(0, Qt.Checked)
+            elif item.checkState(0) == Qt.Unchecked:
+                for i in range(item.childCount()):
+                    item.child(i).setCheckState(0, Qt.Unchecked)
+            self.tree.blockSignals(False)
+        else: # Es un nodo hijo (componente individual)
+            parent = item.parent()
+            if parent:
+                checked_children = 0
+                for i in range(parent.childCount()):
+                    if parent.child(i).checkState(0) == Qt.Checked:
+                        checked_children += 1
+                
+                # Actualizar el estado del padre segun los hijos
+                if checked_children == 0:
+                    parent.setCheckState(0, Qt.Unchecked)
+                elif checked_children == parent.childCount():
+                    parent.setCheckState(0, Qt.Checked)
+                else:
+                    parent.setCheckState(0, Qt.PartiallyChecked)
+
+    def get_selected_components(self) -> list[str]:
         selected = []
         root = self.tree.invisibleRootItem()
         for i in range(root.childCount()):
