@@ -1,33 +1,31 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="WineProtonManager",
-    version="1.3.0",
-    description="Herramienta GUI para gestionar entornos Wine/Proton",
-    long_description=open('README.md', encoding='utf-8').read(),
+    name='WineProtonManager',
+    version='1.3.0',  # You should update this version number as you develop
+    author='EstebanKZL',  # Replace with your name
+    author_email='your.email@example.com',  # Replace with your email
+    description='A manager for Wine and Proton versions.',
+    long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
-    author="EstebanKZL",
-    author_email="tu@email.com",
-    url="https://github.com/EstebanKZL/WineProtonManager",
-    license="GPL-3.0-only",
-    packages=find_packages(),
-    install_requires=[
-        'PyQt5>=5.15.0',
-    ],
+    url='https://github.com/yourusername/WineProtonManager',  # Replace with your GitHub repo URL
+    packages=find_packages(exclude=['docs', 'tests']),
+    include_package_data=True,
+    package_data={
+        '': ['icons/*.png', 'icons/*.ico', 'AppDir/*.desktop', 'ui/*.py'],
+    },
     entry_points={
-        'console_scripts': [
-            'wineprotonmanager=wineprotonmanager:main',
+        'gui_scripts': [
+            'wineprotonmanager=main:main',
         ],
     },
-    include_package_data=True,
+    install_requires=open('requirements.txt').read().splitlines(),
     classifiers=[
-        'Development Status :: 4 - Beta',
-        'Intended Audience :: End Users/Desktop',
-        'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
-        'Operating System :: POSIX :: Linux',
         'Programming Language :: Python :: 3',
-        'Topic :: Desktop Environment :: K Desktop Environment (KDE)',
-        'Topic :: System :: Systems Administration',
+        'License :: OSI Approved :: MIT License',  # Assuming MIT License from your LICENSE file
+        'Operating System :: POSIX :: Linux',
+        'Environment :: X11 Applications :: Qt',
+        'Topic :: System :: Emulators',
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.8', # Adjust based on your actual Python version requirement
 )
