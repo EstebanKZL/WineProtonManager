@@ -55,7 +55,6 @@ COLOR_LIGHT_HIGHLIGHT = "#3daee9" # Azul de Steam Deck
 COLOR_LIGHT_HIGHLIGHT_TEXT = "#FFFFFF"
 COLOR_LIGHT_BORDER = "#BFC4C9"
 
-
 STYLE_STEAM_DECK = {
     "font": QFont("Noto Sans", 11),
     "title_font": QFont("Noto Sans", 14, QFont.Bold),
@@ -531,8 +530,8 @@ class ConfigManager:
                 return True
         return False
 
-    def apply_theme_to_dialog(self, dialog: QDialog | QFileDialog):
-        """Aplica el tema actual (claro/oscuro) a un dialogo de Qt."""
+    def apply_theme_to_dialog(self, dialog: QDialog | QFileDialog | QWidget):
+        """Aplica el tema actual (claro/oscuro) a un dialogo o widget de Qt."""
         theme = self.get_theme()
         palette = QPalette()
         if theme == "dark":
@@ -547,9 +546,17 @@ class ConfigManager:
         else:
             palette = QApplication.style().standardPalette()
         dialog.setPalette(palette)
-        # Asegurar que los botones en QFileDialog tambien usen el estilo
+        # Asegurar que los botones en QFileDialog y otros dialogos tambien usen el estilo
         for btn in dialog.findChildren(QPushButton):
             btn.setStyleSheet(STYLE_STEAM_DECK["dark_button_style"] if theme == "dark" else STYLE_STEAM_DECK["button_style"])
+        
+        # Apply font to all children widgets in the dialog
+        for widget in dialog.findChildren(QWidget):
+            widget.setFont(STYLE_STEAM_DECK["font"])
+
+        # Special handling for QTableWidget to apply the correct theme style
+        for table_widget in dialog.findChildren(QTableWidget):
+            table_widget.setStyleSheet(STYLE_STEAM_DECK["dark_table_style"] if theme == "dark" else STYLE_STEAM_DECK["table_style"])
 
 # --- Hilos de Operacion ---
 class DownloadThread(QThread):
@@ -557,7 +564,7 @@ class DownloadThread(QThread):
     finished = pyqtSignal(str) # Ruta al archivo descargado
     error = pyqtSignal(str)
     
-    def __init__(self, url: str, destination_path: Path, name: str, config_manager: ConfigManager):
+    def __init__(self, url: str, destination_path: Path, name: str, config_manager):
         super().__init__()
         self.url = url
         self.destination = destination_path
@@ -640,7 +647,7 @@ class DecompressionThread(QThread):
     error = pyqtSignal(str)
     progress = pyqtSignal(int) # Puede implementarse para un progreso mas granular
     
-    def __init__(self, archive_path: str, config_manager: ConfigManager, name: str):
+    def __init__(self, archive_path: str, config_manager, name: str):
         super().__init__()
         self.archive_path = Path(archive_path)
         self.config_manager = config_manager
@@ -753,7 +760,7 @@ class InstallerThread(QThread):
     error = pyqtSignal(str)
     canceled = pyqtSignal(str) # Nombre del item que fue cancelado
     
-    def __init__(self, items_to_install: list[tuple[str, str, str]], env: dict, silent_mode: bool, force_mode: bool, winetricks_path: str, config_manager: ConfigManager):
+    def __init__(self, items_to_install: list[tuple[str, str, str]], env: dict, silent_mode: bool, force_mode: bool, winetricks_path: str, config_manager):
         # IMPORTANT: items_to_install needs to be modified to include the 'name'
         # It should now be a list of tuples: (path_to_exe_or_winetricks_name, type_str, user_defined_name)
         super().__init__()
@@ -1013,8 +1020,8 @@ class ConfigDialog(QDialog):
                 background-color: {};
                 color: {};
                 border: 1px solid {};
-                font-size: {}px; /* Aumentaremos este valor */
-                font-weight: bold; /* Letra en negrita */
+                font-size: {}px;
+                font-weight: bold;
             }}
             QListWidget::item {{
                 padding: 4px;
@@ -1025,24 +1032,24 @@ class ConfigDialog(QDialog):
             }}
         """
 
-        # Aumentamos el tamano de la fuente base para las listas.
-        # Por ejemplo, si STYLE_STEAM_DECK["font"] es 10, podemos usar 12 o 13 para las listas.
         base_font_size = STYLE_STEAM_DECK["font"].pointSize()
-        list_font_size = base_font_size + 6 # Aumentar en 2 puntos, ajusta si es necesario.
+        list_font_size = base_font_size + 6
 
         if theme == "dark":
+            # REMOVE .name() here, as COLOR_DARK_WINDOW, COLOR_DARK_TEXT are already strings
             list_bg = COLOR_DARK_WINDOW
             list_text = COLOR_DARK_TEXT
             list_border = COLOR_DARK_BORDER
             list_highlight = COLOR_PRIMARY
         else:
+            # REMOVE .name() here, as COLOR_LIGHT_BASE, COLOR_LIGHT_TEXT are already strings
             list_bg = COLOR_LIGHT_BASE
             list_text = COLOR_LIGHT_TEXT
             list_border = COLOR_LIGHT_BORDER
             list_highlight = COLOR_PRIMARY
 
         unified_list_style = list_style_template.format(
-            list_bg, list_text, list_border, list_font_size, list_highlight # Usar list_font_size aqui
+            list_bg, list_text, list_border, list_font_size, list_highlight
         )
 
         self.list_repos_proton.setStyleSheet(unified_list_style)
@@ -1050,8 +1057,6 @@ class ConfigDialog(QDialog):
         self.list_versions_proton.setStyleSheet(unified_list_style)
         self.list_versions_wine.setStyleSheet(unified_list_style)
         
-        # La lista principal de configuracion podria tener otro estilo si se desea,
-        # pero aqui la mantenemos con el estilo de tabla para consistencia con QTableWidget
         self.list_config.setStyleSheet(STYLE_STEAM_DECK["dark_table_style"] if theme == "dark" else STYLE_STEAM_DECK["table_style"])
 
 
@@ -1959,7 +1964,6 @@ class VersionSearchThread(QThread):
                 fetched_count += 1
                 self.progress.emit(int(fetched_count * 100 / total_repos))
 
-
 class RepositoryDialog(QDialog):
     def __init__(self, repo_type: str, parent: QWidget | None = None):
         super().__init__(parent)
@@ -1971,6 +1975,8 @@ class RepositoryDialog(QDialog):
     def apply_steamdeck_style(self):
         self.setFont(STYLE_STEAM_DECK["font"])
         # Comprobar la paleta de la aplicacion actual para determinar si el tema oscuro esta activo
+        # This will be handled by the parent ConfigDialog's apply_theme_to_dialog method now.
+        # But we can still ensure internal elements use the correct button/label styles.
         theme_is_dark = QApplication.palette().color(QPalette.Window).name() == QColor(STYLE_STEAM_DECK["dark_palette"]["window"]).name()
 
         for widget in self.findChildren(QWidget):
@@ -2020,28 +2026,28 @@ class SelectGroupsDialog(QDialog):
 
     def apply_steamdeck_style(self):
         self.setFont(STYLE_STEAM_DECK["font"])
-        # Comprobar la paleta de la aplicacion actual para determinar si el tema oscuro esta activo
-        theme_is_dark = self.config_manager.get_theme() == "dark" # Usar el config_manager
+        theme_is_dark = self.config_manager.get_theme() == "dark"
 
-        # Estilo para QTreeWidget (fondo blanco, texto negro para mejor legibilidad de los componentes)
         base_font_size = STYLE_STEAM_DECK["font"].pointSize()
-        # Increase font size for the tree widget items
-        tree_font_size = base_font_size + 3 # Adjust as needed
+        tree_font_size = base_font_size + 3
 
-        # Determine colors based on theme for the tree widget
         if theme_is_dark:
-            tree_bg_color = "#31363b"  # Dark window background
-            tree_text_color = "#FFFFFF" # White text
-            tree_border_color = "#5c636a" # Dark border
-            tree_header_bg_color = "#40464d" # Dark button for header
-            tree_header_text_color = "#FFFFFF" # White text for header
+            # REMOVE .name() here
+            tree_bg_color = COLOR_DARK_WINDOW
+            tree_text_color = COLOR_DARK_TEXT
+            tree_border_color = COLOR_DARK_BORDER
+            tree_header_bg_color = COLOR_DARK_BUTTON
+            tree_header_text_color = COLOR_DARK_TEXT
         else:
-            tree_bg_color = "#FFFFFF"  # White background
-            tree_text_color = "#212529" # Dark text
-            tree_border_color = "#d0d0d0" # Light border
-            tree_header_bg_color = "#f1f3f4" # Light gray for header
-            tree_header_text_color = "#212529" # Dark text for header
-
+            # REMOVE .name() here
+            tree_bg_color = COLOR_LIGHT_BASE
+            tree_text_color = COLOR_LIGHT_TEXT
+            tree_border_color = COLOR_LIGHT_BORDER
+            # Here, STYLE_STEAM_DECK["light_palette"]["button"] is a QColor, so .name() IS appropriate if you wanted that specific color.
+            # However, if you want it to be a direct string like the others, stick to a COLOR_ constant.
+            # I'll change it to COLOR_LIGHT_WINDOW to match the simple string pattern.
+            tree_header_bg_color = COLOR_LIGHT_WINDOW # Use a direct string constant
+            tree_header_text_color = COLOR_LIGHT_TEXT
 
         self.tree.setStyleSheet(f"""
             QTreeWidget {{
@@ -2062,7 +2068,7 @@ class SelectGroupsDialog(QDialog):
                 padding: 8px;
                 border: 1px solid {tree_border_color};
                 font-weight: bold;
-                color: {tree_header_text_color}; /* Asegurar que el texto del encabezado sea legible */
+                color: {tree_header_text_color};
             }}
         """)
 
@@ -2095,7 +2101,6 @@ class SelectGroupsDialog(QDialog):
         # Forzar repintado para asegurar que los estilos se apliquen inmediatamente
         self.repaint()
 
-
     def setup_ui(self):
         layout = QVBoxLayout()
         
@@ -2106,17 +2111,12 @@ class SelectGroupsDialog(QDialog):
         self.tree.itemChanged.connect(self._handle_item_change) # Conectar para manejar el estado de tres estados
         
         self.component_descriptions = {
-            "vb2run": "Tiempo de Ejecucion de Visual Basic 2.0", "vb3run": "Tiempo de Ejecucion de Visual Basic 3.0",
-            "vb4run": "Tiempo de Ejecucion de Visual Basic 4.0", "vb5run": "Tiempo de Ejecucion de Visual Basic 5.0",
-            "vb6run": "Tiempo de Ejecucion de Visual Basic 6.0",
-            "vcrun6": "Tiempo de Ejecucion de Visual C++ 6.0 (SP6 recomendado)", "vcrun2005": "Tiempo de Ejecucion de Visual C++ 2005",
-            "vcrun2008": "Tiempo de Ejecucion de Visual C++ 2008", "vcrun2010": "Tiempo de Ejecucion de Visual C++ 2010",
-            "vcrun2012": "Tiempo de Ejecucion de Visual C++ 2012", "vcrun2013": "Tiempo de Ejecucion de Visual C++ 2013",
-            "vcrun2015": "Tiempo de Ejecucion de Visual C++ 2015", "vcrun2017": "Tiempo de Ejecucion de Visual C++ 2017",
-            "vcrun2019": "Tiempo de Ejecucion de Visual C++ 2019", "vcrun2022": "Tiempo de Ejecucion de Visual C++ 2022",
-            "dotnet40": "Microsoft .NET Framework 4.0", "dotnet48": "Microsoft .NET Framework 4.8",
-            "dxvk": "DXVK (DirectX a Vulkan)", "vkd3d": "VKD3D-Proton (DirectX 12 a Vulkan)",
-            # Anadir mas descripciones segun se desee
+            # Bibliotecas Visual Basic
+            "vb2run": "Runtime de Visual Basic 2.0",
+            "vb3run": "Runtime de Visual Basic 3.0",
+            "vb4run": "Runtime de Visual Basic 4.0",
+            "vb5run": "Runtime de Visual Basic 5.0",
+            "vb6run": "Runtime de Visual Basic 6.0",
         }
         
         for group_name, components in self.component_groups.items():
@@ -2546,7 +2546,7 @@ class InstallerApp(QWidget):
         custom_group.setLayout(custom_layout)
         actions_layout.addWidget(custom_group)
         
-        options_group = QGroupBox("Opciones de Instalacion (solo para esta sesion)")
+        options_group = QGroupBox("Opciones de Instalacion")
         options_layout = QVBoxLayout()
         self.checkbox_silent_session = QCheckBox("Habilitar modo silencioso para esta instalacion Winetricks (-q)")
         self.checkbox_silent_session.setChecked(self.silent_mode) 
@@ -3351,20 +3351,20 @@ class InstallerApp(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo abrir Winecfg: {str(e)}")
 
-
 if __name__ == "__main__":
+    # Enable High DPI scaling for better appearance on high-resolution displays
     if hasattr(Qt, 'AA_EnableHighDpiScaling'):
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     if hasattr(Qt, 'AA_UseHighDpiPixmaps'):
         QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")
+    app.setStyle("Fusion") # Use Fusion style for a more consistent look across platforms
 
     config_manager = ConfigManager()
     installer = InstallerApp(config_manager)
     
-    # Ajustar el tamano de la ventana al tamano de la pantalla si es demasiado grande
+    # Adjust window size to screen if it's too large
     screen = app.primaryScreen().availableGeometry()
     window_size = config_manager.get_window_size()
     
