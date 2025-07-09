@@ -1,182 +1,209 @@
 import os
+import ssl
 import shutil
-import time
 import tarfile
 import zipfile
 import tempfile
+from urllib.request import urlopen, Request, HTTPError
 from pathlib import Path
-from urllib.request import urlopen, Request
+
 from PyQt5.QtCore import QThread, pyqtSignal
 
+# Deshabilitar verificacion SSL para casos especificos (descargas, APIs).
+# Esto debe usarse con precaucion, solo si las fuentes son de confianza.
+ssl._create_default_https_context = ssl._create_unverified_context
 
 class DownloadThread(QThread):
-    progress = pyqtSignal(int)
-    finished = pyqtSignal(str)
+    progress = pyqtSignal(int) # % de progreso
+    finished = pyqtSignal(str) # Ruta al archivo descargado
     error = pyqtSignal(str)
-
-    def __init__(self, url, destination, config_manager):
+    
+    def __init__(self, url: str, destination_path: Path, name: str, config_manager):
         super().__init__()
         self.url = url
-        self.destination = destination
+        self.destination = destination_path
+        self.name = name
         self.config_manager = config_manager
         self._is_running = True
-
+    
     def run(self):
+        self.config_manager.write_to_log(self.name, f"Iniciando descarga de {self.url} a {self.destination}")
         try:
             req = Request(self.url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urlopen(req) as response:
+            with urlopen(req, timeout=30) as response: # Anadido tiempo de espera para urlopen
                 if response.getcode() != 200:
-                    raise Exception(f"Error HTTP {response.getcode()}: {response.reason}")
-
+                    raise HTTPError(self.url, response.getcode(), response.reason, response.headers, None)
+                
                 total_size = int(response.headers.get('content-length', 0))
                 downloaded = 0
                 chunk_size = 8192
+                
+                # Pre-comprobacion de espacio en disco
+                free_space = shutil.disk_usage(self.destination.parent).free
+                # Estimacion conservadora: se necesita al menos el doble del tamano del archivo.
+                # Puede ajustarse si se sabe mas sobre la compresion.
+                required_space = total_size * 2 if total_size > 0 else 500 * 1024 * 1024 # 500MB si es desconocido
+                
+                if free_space < required_space:
+                    raise IOError(f"Espacio en disco insuficiente en {self.destination.parent}. Requerido: {required_space / (1024*1024):.1f} MB, Disponible: {free_space / (1024*1024):.1f} MB")
 
-                dest_path = Path(self.destination)
-                if dest_path.exists():
-                    dest_path.unlink()
-
-                required_space = total_size if total_size > 0 else 100 * 1024 * 1024
-                stat = os.statvfs(dest_path.parent)
-                free_space = stat.f_frsize * stat.f_bavail
-
-                if free_space < required_space * 1.1:
-                    raise Exception(f"No hay suficiente espacio en disco. Se necesitan {required_space/1024/1024:.1f} MB")
-
+                # Eliminar archivo parcial si existe para evitar conflictos
+                if self.destination.exists():
+                    try:
+                        self.destination.unlink()
+                    except OSError as e:
+                        raise IOError(f"No se pudo eliminar el archivo parcial existente {self.destination}: {e}")
+                
                 with open(self.destination, 'wb') as f:
                     while self._is_running:
                         chunk = response.read(chunk_size)
                         if not chunk:
                             break
-
+                            
                         f.write(chunk)
                         downloaded += len(chunk)
-
+                        
                         if total_size > 0:
-                            self.progress.emit(int(downloaded * 100 / total_size))
-
-            if self._is_running:
+                            progress = int(downloaded * 100 / total_size)
+                            self.progress.emit(progress)
+                
+                if not self._is_running: # Si se detuvo a mitad de la descarga
+                    if self.destination.exists():
+                        try:
+                            self.destination.unlink()
+                        except OSError:
+                            pass # Ignorar errores durante la limpieza
+                    self.config_manager.write_to_log(self.name, f"Descarga de {self.name} cancelada.")
+                    return # Salir del hilo limpiamente
+                
                 self.finished.emit(str(self.destination))
-
+                self.config_manager.write_to_log(self.name, f"Descarga de {self.name} completada.")
+                
+        except HTTPError as e:
+            msg = f"Error HTTP descargando {self.url}: {e.code} - {e.reason}"
+            self.config_manager.write_to_log(self.name, f"ERROR: {msg}")
+            self.error.emit(msg)
         except Exception as e:
-            if Path(self.destination).exists():
+            msg = f"Error inesperado durante la descarga de {self.name}: {str(e)}"
+            self.config_manager.write_to_log(self.name, f"ERROR: {msg}")
+            if self.destination.exists():
                 try:
-                    Path(self.destination).unlink()
-                except Exception:
-                    pass
-            self.error.emit(f"Error downloading {self.url}: {str(e)}")
-
+                    self.destination.unlink() # Limpiar archivo parcial
+                except OSError:
+                    pass # Ignorar errores durante la limpieza
+            self.error.emit(msg)
+            
     def stop(self):
         self._is_running = False
 
-class DecompressThread(QThread):
-    finished = pyqtSignal(str)  # Emitir la ruta del directorio descomprimido
+class DecompressionThread(QThread):
+    finished = pyqtSignal(str)
     error = pyqtSignal(str)
-    progress = pyqtSignal(int)  # Para mostrar progreso si es necesario
-
-    def __init__(self, archive_path, config_manager):
+    progress = pyqtSignal(int) # Puede implementarse para un progreso mas granular
+    
+    def __init__(self, archive_path: str, config_manager, name: str):
         super().__init__()
         self.archive_path = Path(archive_path)
         self.config_manager = config_manager
-        self._is_running = True
+        self.name = name
         self.target_dir = None
+        self._is_running = True
 
-    def set_permissions(self, path):
-        """Función recursiva para establecer permisos"""
+    def _set_permissions_recursively(self, path: Path):
+        """Aplica permisos 0o755 (rwx para propietario, rx para grupo/otros) recursivamente."""
+        if not path.exists():
+            return
+            
         try:
+            # Otorgar permisos de ejecucion para archivos y directorios
             if path.is_dir():
-                os.chmod(path, 0o775)  # Permisos para directorios
+                os.chmod(path, 0o755)
                 for item in path.iterdir():
-                    self.set_permissions(item)
-            else:
-                os.chmod(path, 0o775)  # Permisos para archivos
-        except Exception as e:
-            print(f"Error al establecer permisos en {path}: {e}")
+                    self._set_permissions_recursively(item)
+            elif path.is_file():
+                # Asegurarse de que sea ejecutable si 'bin' esta en su ruta
+                if "bin" in path.parts or "wine" in path.name.lower() or "wineserver" in path.name.lower():
+                    os.chmod(path, 0o755)
+                else: # Archivos normales
+                    os.chmod(path, 0o644) # rw-r--r--
+        except OSError as e:
+            self.config_manager.write_to_log(self.name, f"Advertencia: No se pudieron establecer permisos en {path}: {e}")
 
     def run(self):
+        self.config_manager.write_to_log(self.name, f"Iniciando descompresion de {self.archive_path}")
         try:
             if not self.archive_path.exists():
-                raise FileNotFoundError(f"El archivo {self.archive_path} no existe")
+                raise FileNotFoundError(f"El archivo {self.archive_path} no existe.")
 
-            dest_dir = self.archive_path.parent
-
-            # Verificar espacio en disco
-            stat = os.statvfs(dest_dir)
-            free_space = stat.f_frsize * stat.f_bavail
-            archive_size = self.archive_path.stat().st_size
-            required_space = archive_size * 3
-
-            if free_space < required_space:
-                raise Exception(f"No hay suficiente espacio en disco. Se necesitan al menos {required_space/1024/1024:.1f} MB")
-
-            # Extraer base name
+            dest_dir_root = self.archive_path.parent # Directorio donde se guardara Wine/Proton
+            
+            # Identificar el nombre base para el directorio de destino
+            # Ejemplo: proton-ge-8-25.tar.gz -> proton-ge-8-25
             base_name = self.archive_path.stem
-            tmp_path = self.archive_path
-            while tmp_path.suffix:
-                tmp_path = tmp_path.with_suffix("")
-                base_name = tmp_path.name
+            if self.archive_path.suffix in ['.gz', '.xz', '.zip']:
+                base_name = Path(base_name).stem # Eliminar el segundo sufijo si es tar.gz/tar.xz
+            
+            self.target_dir = dest_dir_root / base_name
+            
+            if self.target_dir.exists():
+                self.config_manager.write_to_log(self.name, f"El directorio de destino {self.target_dir} ya existe. Eliminando...")
+                shutil.rmtree(self.target_dir)
 
-            with tempfile.TemporaryDirectory(prefix="wpm_") as temp_dir:
-                temp_dir = Path(temp_dir)
+            with tempfile.TemporaryDirectory(prefix="wpm_decompress_") as temp_unzip_dir_str:
+                temp_unzip_dir = Path(temp_unzip_dir_str)
+                self.config_manager.write_to_log(self.name, f"Descomprimiendo al directorio temporal: {temp_unzip_dir}")
 
-                # Descomprimir en tmp
-                if self.archive_path.suffixes[-2:] == ['.tar', '.gz'] or self.archive_path.suffix == '.tgz':
-                    with tarfile.open(self.archive_path, "r:gz") as tar:
-                        tar.extractall(path=temp_dir, filter='data')
-                elif self.archive_path.suffixes[-2:] == ['.tar', '.xz'] or self.archive_path.suffix == '.txz':
-                    with tarfile.open(self.archive_path, "r:xz") as tar:
-                        tar.extractall(path=temp_dir, filter='data')
-                elif self.archive_path.suffix == '.zip':
+                if self.archive_path.suffix == '.zip':
                     with zipfile.ZipFile(self.archive_path, 'r') as zip_ref:
-                        zip_ref.extractall(temp_dir)
+                        zip_ref.extractall(temp_unzip_dir)
+                elif self.archive_path.suffix in ['.gz', '.xz', '.bz2', '.zst'] or self.archive_path.name.endswith(('.tar.gz', '.tar.xz')):
+                    # Manejar multiples formatos tar
+                    mode = "r:" + self.archive_path.suffix[1:] # e.g., ".gz" -> "r:gz"
+                    if self.archive_path.name.endswith('.tar.gz'):
+                        mode = "r:gz"
+                    elif self.archive_path.name.endswith('.tar.xz'):
+                        mode = "r:xz"
+                    
+                    with tarfile.open(self.archive_path, mode) as tar:
+                        tar.extractall(path=temp_unzip_dir, filter='data') # Usar filter='data' por seguridad
                 else:
-                    file_output = subprocess.run(["file", "-b", str(self.archive_path)],
-                                              capture_output=True, text=True).stdout
-                    if 'XZ compressed data' in file_output:
-                        with tarfile.open(self.archive_path, "r:xz") as tar:
-                            tar.extractall(path=temp_dir, filter='data')
-                    else:
-                        raise ValueError(f"Formato no soportado: {self.archive_path}")
+                    raise ValueError(f"Formato de archivo no compatible para descompresion: {self.archive_path.suffix}")
 
-                # Establecer permisos en el directorio temporal ANTES de mover
-                self.set_permissions(temp_dir)
-
-                # Mover contenido al destino final
-                contents = list(temp_dir.iterdir())
-                if len(contents) == 1 and contents[0].is_dir():
-                    self.target_dir = dest_dir / contents[0].name
-                    if self.target_dir.exists():
-                        shutil.rmtree(self.target_dir)
-                    shutil.move(str(contents[0]), str(self.target_dir))
+                # Encontrar el directorio principal dentro del archivo (comun en lanzamientos de Proton/Wine)
+                # Si solo hay un directorio en la raiz de temp_unzip_dir, mover ese directorio
+                extracted_contents = list(temp_unzip_dir.iterdir())
+                if len(extracted_contents) == 1 and extracted_contents[0].is_dir():
+                    source_dir_to_move = extracted_contents[0]
                 else:
-                    self.target_dir = dest_dir / base_name
-                    if self.target_dir.exists():
-                        shutil.rmtree(self.target_dir)
-                    self.target_dir.mkdir(parents=True, exist_ok=True)
-                    for item in contents:
-                        shutil.move(str(item), str(self.target_dir / item.name))
+                    source_dir_to_move = temp_unzip_dir # Mover todo el contenido del directorio temporal
 
-                # Establecer permisos nuevamente en el destino final por seguridad
-                self.set_permissions(self.target_dir)
+                # Mover el contenido extraido al destino final
+                self.config_manager.write_to_log(self.name, f"Moviendo {source_dir_to_move} a {self.target_dir}")
+                shutil.move(str(source_dir_to_move), str(self.target_dir))
+                
+                # Establecer permisos despues de mover, si el sistema de archivos lo soporta
+                self._set_permissions_recursively(self.target_dir)
 
-            # Eliminar archivo comprimido si existe
+            # Eliminar archivo comprimido despues de una descompresion exitosa
             try:
-                if self.archive_path.exists():
-                    self.archive_path.unlink()
-            except Exception as e:
-                print(f"No se pudo eliminar archivo comprimido: {e}")
+                self.archive_path.unlink()
+                self.config_manager.write_to_log(self.name, f"Archivo comprimido {self.archive_path} eliminado.")
+            except OSError as e:
+                self.config_manager.write_to_log(self.name, f"Advertencia: No se pudo eliminar el archivo comprimido {self.archive_path}: {e}")
 
             self.finished.emit(str(self.target_dir))
+            self.config_manager.write_to_log(self.name, f"Descompresion de {self.name} completada. Ruta: {self.target_dir}")
 
         except Exception as e:
-            # Limpieza en caso de error
-            try:
-                if self.target_dir and self.target_dir.exists():
+            msg = f"Error descomprimiendo {self.name}: {str(e)}"
+            self.config_manager.write_to_log(self.name, f"ERROR: {msg}")
+            if self.target_dir and self.target_dir.exists():
+                try:
                     shutil.rmtree(self.target_dir, ignore_errors=True)
-            except Exception as cleanup_error:
-                print(f"Error al limpiar: {cleanup_error}")
-
-            self.error.emit(f"Error al descomprimir {self.archive_path}: {str(e)}")
+                    self.config_manager.write_to_log(self.name, f"Directorio incompleto {self.target_dir} eliminado despues del error.")
+                except OSError as cleanup_error:
+                    self.config_manager.write_to_log(self.name, f"Error limpiando {self.target_dir}: {cleanup_error}")
+            self.error.emit(msg)
 
     def stop(self):
         self._is_running = False
