@@ -1,72 +1,87 @@
 import sys
 import os
 import subprocess
+import json
+import re
+import time
+import tempfile
+import ssl
+import tarfile
+import zipfile
+import shutil
 from pathlib import Path
+from functools import partial 
+
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QListWidget, QLabel, QCheckBox, QDialog, QDialogButtonBox,
     QMessageBox, QGroupBox, QComboBox, QLineEdit, QFileDialog,
-    QTabWidget, QFormLayout, QScrollArea, QListWidgetItem, QAction,
-    QMenu, QMenuBar, QTableWidget, QTableWidgetItem, QHeaderView, 
-    QTreeWidget, QTreeWidgetItem, QProgressDialog, QProgressBar
+    QTabWidget, QFormLayout, QScrollArea, QListWidgetItem,
+    QTableWidget, QTableWidgetItem, QHeaderView,
+    QTreeWidget, QTreeWidgetItem, QProgressDialog, QProgressBar,
+    QInputDialog
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QSize, QUrl
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QSize, QUrl, QTimer
 from PyQt5.QtGui import QIcon, QPalette, QColor, QFont, QDesktopServices
 
-# Actualiza esta importación para incluir SelectGroupsDialog
-from dialogs import ConfigDialog, CustomProgramDialog, ManageProgramsDialog, SelectGroupsDialog
-from installer_thread import InstallerThread
-from styles import STEAM_DECK_STYLE
+from styles import STYLE_STEAM_DECK
+from config_manager import ConfigManager
+from installer_thread import InstallerThread # Corrected import path
+# Import dialogs from their new locations
+from dialogs.config_dialog import ConfigDialog 
+from dialogs.custom_program_dialog import CustomProgramDialog
+from dialogs.manage_programs_dialog import ManageProgramsDialog
+from dialogs.select_groups_dialog import SelectGroupsDialog
+
 
 class InstallerApp(QWidget):
-    def __init__(self, config_manager):
+    def __init__(self, config_manager: ConfigManager):
         super().__init__()
         self.config_manager = config_manager
         self.installer_thread = None
-        self.selected_components = []
-        self.custom_programs = []
-        self.custom_program_types = []
+        
+        self.items_for_installation: list[dict] = []
+        
         self.silent_mode = self.config_manager.get_silent_install()
+        self.force_mode = self.config_manager.get_force_winetricks_install()
 
-        # Aplicar el tema guardado al iniciar
-        self.apply_theme_on_startup()
+        self.apply_theme_at_startup()
         self.setup_ui()
         self.apply_steamdeck_style()
-        self.setMinimumSize(1000, 700)  # Tamaño mínimo fijo
+        self.setMinimumSize(1000, 700)
 
-    def apply_theme_on_startup(self):
+    def apply_theme_at_startup(self):
         theme = self.config_manager.get_theme()
-        palette = QApplication.palette()
+        palette = QPalette()
         
         if theme == "dark":
-            palette.setColor(QPalette.Window, STEAM_DECK_STYLE["dark_palette"]["window"])
-            palette.setColor(QPalette.WindowText, STEAM_DECK_STYLE["dark_palette"]["window_text"])
-            palette.setColor(QPalette.Base, STEAM_DECK_STYLE["dark_palette"]["base"])
-            palette.setColor(QPalette.Text, STEAM_DECK_STYLE["dark_palette"]["text"])
-            palette.setColor(QPalette.Button, STEAM_DECK_STYLE["dark_palette"]["button"])
-            palette.setColor(QPalette.ButtonText, STEAM_DECK_STYLE["dark_palette"]["button_text"])
-            palette.setColor(QPalette.Highlight, STEAM_DECK_STYLE["dark_palette"]["highlight"])
-            palette.setColor(QPalette.HighlightedText, STEAM_DECK_STYLE["dark_palette"]["highlight_text"])
+            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["dark_palette"]["window"])
+            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["dark_palette"]["window_text"])
+            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["dark_palette"]["base"])
+            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["dark_palette"]["text"])
+            palette.setColor(QPalette.Button, STYLE_STEAM_DECK["dark_palette"]["button"])
+            palette.setColor(QPalette.ButtonText, STYLE_STEAM_DECK["dark_palette"]["button_text"])
+            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["dark_palette"]["highlight"])
+            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["dark_palette"]["highlight_text"])
         else:
             palette = QApplication.style().standardPalette()
-        
+            
         QApplication.setPalette(palette)
 
     def apply_steamdeck_style(self):
-        self.setFont(STEAM_DECK_STYLE["font"])
+        self.setFont(STYLE_STEAM_DECK["font"])
+        theme = self.config_manager.get_theme() 
+        
         for widget in self.findChildren(QWidget):
-            if isinstance(widget, (QPushButton, QLabel, QComboBox, QLineEdit)):
-                widget.setFont(STEAM_DECK_STYLE["font"])
-
             if isinstance(widget, QPushButton):
-                widget.setStyleSheet(STEAM_DECK_STYLE["button_style"])
-            
-            # Aplicar a los QGroupBox
-            if isinstance(widget, QGroupBox):
-                widget.setFont(STEAM_DECK_STYLE["title_font"])
-                
-        # Conectar el cambio de estado de los checkboxes
-        self.items_table.itemChanged.connect(self.on_item_check_changed)
+                widget.setStyleSheet(STYLE_STEAM_DECK["dark_button_style"] if theme == "dark" else STYLE_STEAM_DECK["button_style"])
+            elif isinstance(widget, QGroupBox):
+                widget.setFont(STYLE_STEAM_DECK["title_font"])
+                widget.setStyleSheet(STYLE_STEAM_DECK["dark_groupbox_style"] if theme == "dark" else STYLE_STEAM_DECK["groupbox_style"])
+            elif isinstance(widget, QLabel):
+                widget.setFont(STYLE_STEAM_DECK["font"])
+        
+        self.items_table.setStyleSheet(STYLE_STEAM_DECK["dark_table_style"] if theme == "dark" else STYLE_STEAM_DECK["table_style"])
 
     def setup_ui(self):
         self.setWindowTitle("WineProton Manager")
@@ -77,142 +92,150 @@ class InstallerApp(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         content = QWidget()
-        layout_content = QHBoxLayout(content)
+        content_layout = QHBoxLayout(content)
         
-        layout_content.addWidget(self.create_left_panel(), 1)
-        layout_content.addWidget(self.create_right_panel(), 2)
+        content_layout.addWidget(self.create_left_panel(), 1)
+        content_layout.addWidget(self.create_right_panel(), 2)
         scroll.setWidget(content)
         main_layout.addWidget(scroll)
 
-    def create_left_panel(self):
+    def create_left_panel(self) -> QWidget:
         panel = QWidget()
         layout = QVBoxLayout(panel)
         
-        config_group = QGroupBox("Configuración del Entorno")
+        config_group = QGroupBox("Configuracion del Entorno Actual")
         config_layout = QVBoxLayout()
-        self.config_label = QLabel()
-        self.config_label.setWordWrap(True)
-        self.update_config_info()  # Cambiado de update_config_label() a update_config_info()
+        self.lbl_config = QLabel()
+        self.lbl_config.setWordWrap(True)
+        self.update_config_info()
         
-        self.config_btn = QPushButton("Configurar Entornos...")
-        self.config_btn.setAutoDefault(False)
-        self.config_btn.clicked.connect(self.configure_environments)
-        config_layout.addWidget(self.config_label)
-        config_layout.addWidget(self.config_btn)
+        self.btn_manage_environments = QPushButton("Gestionar Entornos...")
+        self.btn_manage_environments.setAutoDefault(False)
+        self.btn_manage_environments.clicked.connect(self.configure_environments)
+        config_layout.addWidget(self.lbl_config)
+        config_layout.addWidget(self.btn_manage_environments)
         config_group.setLayout(config_layout)
         layout.addWidget(config_group)
         
-        action_group = QGroupBox("Acciones")
-        action_layout = QVBoxLayout()
+        actions_group = QGroupBox("Acciones de Instalacion")
+        actions_layout = QVBoxLayout()
         
-        comp_group = QGroupBox("Componentes")
-        comp_layout = QVBoxLayout()
-        self.select_components_btn = QPushButton("Seleccionar Componentes")
-        self.select_components_btn.setAutoDefault(False)
-        self.select_components_btn.clicked.connect(self.select_components)
-        comp_layout.addWidget(self.select_components_btn)
-        comp_group.setLayout(comp_layout)
-        action_layout.addWidget(comp_group)
+        components_group = QGroupBox("Componentes de Winetricks")
+        components_layout = QVBoxLayout()
+        self.btn_select_components = QPushButton("Seleccionar Componentes de Winetricks")
+        self.btn_select_components.setAutoDefault(False)
+        self.btn_select_components.clicked.connect(self.select_components)
+        components_layout.addWidget(self.btn_select_components)
+        components_group.setLayout(components_layout)
+        actions_layout.addWidget(components_group)
         
         custom_group = QGroupBox("Programas Personalizados")
         custom_layout = QVBoxLayout()
-        self.add_custom_btn = QPushButton("Añadir Programa")
-        self.add_custom_btn.setAutoDefault(False)
-        self.add_custom_btn.clicked.connect(self.add_custom_program)
-        custom_layout.addWidget(self.add_custom_btn)
+        self.btn_add_custom = QPushButton("Anadir Programa/Script")
+        self.btn_add_custom.setAutoDefault(False)
+        self.btn_add_custom.clicked.connect(self.add_custom_program)
+        custom_layout.addWidget(self.btn_add_custom)
         
-        self.manage_custom_btn = QPushButton("Gestionar Programas Guardados")
-        self.manage_custom_btn.setAutoDefault(False)
-        self.manage_custom_btn.clicked.connect(self.manage_custom_programs)
-        custom_layout.addWidget(self.manage_custom_btn)
+        self.btn_manage_custom = QPushButton("Cargar/Eliminar Programas Guardados")
+        self.btn_manage_custom.setAutoDefault(False)
+        self.btn_manage_custom.clicked.connect(self.manage_custom_programs)
+        custom_layout.addWidget(self.btn_manage_custom)
         custom_group.setLayout(custom_layout)
-        action_layout.addWidget(custom_group)
+        actions_layout.addWidget(custom_group)
         
-        options_group = QGroupBox("Opciones de Instalación")
+        options_group = QGroupBox("Opciones de Instalacion")
         options_layout = QVBoxLayout()
-        self.silent_checkbox = QCheckBox("Modo silencioso (solo para winetricks)")
-        self.silent_checkbox.setChecked(self.silent_mode)
-        self.silent_checkbox.stateChanged.connect(self.update_silent_mode)
-        options_layout.addWidget(self.silent_checkbox)
+        self.checkbox_silent_session = QCheckBox("Habilitar modo silencioso para esta instalacion Winetricks (-q)")
+        self.checkbox_silent_session.setChecked(self.silent_mode) 
+        self.checkbox_silent_session.stateChanged.connect(self.update_silent_mode_session)
+        options_layout.addWidget(self.checkbox_silent_session)
+        
+        self.checkbox_force_winetricks_session = QCheckBox("Forzar instalacion de Winetricks para esta instalacion (--force)")
+        self.checkbox_force_winetricks_session.setChecked(self.force_mode) 
+        self.checkbox_force_winetricks_session.stateChanged.connect(self.update_force_mode_session)
+        options_layout.addWidget(self.checkbox_force_winetricks_session)
+        
         options_group.setLayout(options_layout)
-        action_layout.addWidget(options_group)
+        actions_layout.addWidget(options_group)
         
-        self.install_btn = QPushButton("Iniciar Instalación")
-        self.install_btn.setAutoDefault(False)
-        self.install_btn.clicked.connect(self.start_installation)
-        self.install_btn.setEnabled(False)
+        self.btn_install = QPushButton("Iniciar Instalacion")
+        self.btn_install.setAutoDefault(False)
+        self.btn_install.clicked.connect(self.start_installation)
+        self.btn_install.setEnabled(False) 
         
-        self.cancel_btn = QPushButton("Cancelar Instalación")
-        self.cancel_btn.setAutoDefault(False)
-        self.cancel_btn.clicked.connect(self.cancel_installation)
-        self.cancel_btn.setEnabled(False)
+        self.btn_cancel = QPushButton("Cancelar Instalacion")
+        self.btn_cancel.setAutoDefault(False)
+        self.btn_cancel.clicked.connect(self.cancel_installation)
+        self.btn_cancel.setEnabled(False) 
         
-        self.winetricks_btn = QPushButton("Abrir Winetricks GUI")
-        self.winetricks_btn.setAutoDefault(False)
-        self.winetricks_btn.clicked.connect(self.open_winetricks)
+        actions_layout.addWidget(self.btn_install)
+        actions_layout.addWidget(self.btn_cancel)
         
-        # Crear layout para los botones en dos columnas
+        tools_group = QGroupBox("Herramientas del Prefijo")
         tools_layout = QHBoxLayout()
         
-        # Columna izquierda
-        left_col = QVBoxLayout()
-        self.shell_btn = QPushButton("Terminal")
-        self.shell_btn.setAutoDefault(False)
-        self.shell_btn.clicked.connect(self.open_shell)
-        left_col.addWidget(self.shell_btn)
+        left_column = QVBoxLayout()
+        self.btn_shell = QPushButton("Terminal")
+        self.btn_shell.setAutoDefault(False)
+        self.btn_shell.clicked.connect(self.open_shell)
+        left_column.addWidget(self.btn_shell)
         
-        self.prefix_btn = QPushButton("Prefix")
-        self.prefix_btn.setAutoDefault(False)
-        self.prefix_btn.clicked.connect(self.open_prefix_folder)
-        left_col.addWidget(self.prefix_btn)
+        self.btn_prefix_folder = QPushButton("Carpeta del Prefijo")
+        self.btn_prefix_folder.setAutoDefault(False)
+        self.btn_prefix_folder.clicked.connect(self.open_prefix_folder)
+        left_column.addWidget(self.btn_prefix_folder)
+
+        right_column = QVBoxLayout()
+        self.btn_winetricks_gui = QPushButton("Winetricks GUI")
+        self.btn_winetricks_gui.setAutoDefault(False)
+        self.btn_winetricks_gui.clicked.connect(self.open_winetricks)
+        right_column.addWidget(self.btn_winetricks_gui)
         
-        # Columna derecha
-        right_col = QVBoxLayout()
-        self.cfgwine_btn = QPushButton("Winecfg")
-        self.cfgwine_btn.setAutoDefault(False)
-        self.cfgwine_btn.clicked.connect(self.open_cfgwine)
-        right_col.addWidget(self.cfgwine_btn)
+        self.btn_winecfg = QPushButton("Winecfg")
+        self.btn_winecfg.setAutoDefault(False)
+        self.btn_winecfg.clicked.connect(self.open_winecfg)
+        right_column.addWidget(self.btn_winecfg)
         
-        self.explorer_btn = QPushButton("Explorer")
-        self.explorer_btn.setAutoDefault(False)
-        self.explorer_btn.clicked.connect(self.open_explorer)
-        right_col.addWidget(self.explorer_btn)
-        
-        # Añadir columnas al layout horizontal
-        tools_layout.addLayout(left_col)
-        tools_layout.addLayout(right_col)
-        
-        action_layout.addWidget(self.install_btn)
-        action_layout.addWidget(self.cancel_btn)
-        action_layout.addWidget(self.winetricks_btn)
-        action_layout.addLayout(tools_layout)
-        action_layout.addStretch()
-        action_group.setLayout(action_layout)
-        layout.addWidget(action_group)
+        self.btn_explorer = QPushButton("Explorador del Prefijo")
+        self.btn_explorer.setAutoDefault(False)
+        self.btn_explorer.clicked.connect(self.open_explorer)
+        right_column.addWidget(self.btn_explorer)
+
+        tools_layout.addLayout(left_column)
+        tools_layout.addLayout(right_column)
+        tools_group.setLayout(tools_layout)
+        actions_layout.addWidget(tools_group)
+
+        actions_layout.addStretch()
+        actions_group.setLayout(actions_layout)
+        layout.addWidget(actions_group)
         
         return panel
 
-    def create_right_panel(self):
+    def create_right_panel(self) -> QWidget:
         panel = QWidget()
         layout = QVBoxLayout(panel)
         
-        self.status_label = QLabel("Items a instalar:")
-        layout.addWidget(self.status_label)
+        self.lbl_status = QLabel("Lista de elementos a instalar:")
+        layout.addWidget(self.lbl_status)
         
         self.items_table = QTableWidget()
         self.items_table.setColumnCount(4)
-        self.items_table.setHorizontalHeaderLabels(["Acciones", "Nombre", "Tipo", "Estado"])
-        self.items_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.items_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.items_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.items_table.setHorizontalHeaderLabels(["Seleccionar", "Nombre", "Tipo", "Estado"])
+        self.items_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents) 
+        self.items_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch) 
+        self.items_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents) 
+        self.items_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents) 
         self.items_table.verticalHeader().setVisible(False)
         self.items_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.items_table.setSelectionMode(QTableWidget.SingleSelection) 
+        self.items_table.itemChanged.connect(self.on_table_item_changed)
         layout.addWidget(self.items_table)
         
         btn_layout = QHBoxLayout()
         buttons = [
             ("Limpiar Lista", self.clear_list),
-            ("Eliminar Seleccionados", self.remove_selected),
+            ("Eliminar Seleccion", self.delete_selected_from_table),
             ("Mover Arriba", self.move_item_up),
             ("Mover Abajo", self.move_item_down)
         ]
@@ -222,225 +245,210 @@ class InstallerApp(QWidget):
             btn.setAutoDefault(False)
             btn.clicked.connect(handler)
             btn_layout.addWidget(btn)
-        
+            
         layout.addLayout(btn_layout)
         return panel
 
-    def set_theme(self, theme):
-        self.config_manager.set_theme(theme)
-        self.apply_theme()
+    def on_table_item_changed(self, item: QTableWidgetItem):
+        """Maneja los cambios en las casillas de verificacion de la tabla."""
+        try:
+            self.items_table.itemChanged.disconnect(self.on_table_item_changed)
+        except TypeError: 
+            pass
+
+        if item.column() == 0: 
+            row = item.row()
+            status_item = self.items_table.item(row, 3)
+
+            if status_item:
+                # Only change status if it's currently "Pendiente" or "Omitido"
+                # This prevents overwriting "Finalizado" or "Error" after installation.
+                current_status_text = status_item.text()
+                if current_status_text in ["Pendiente", "Omitido"]:
+                    new_status = "Pendiente" if item.checkState() == Qt.Checked else "Omitido"
+                    status_item.setText(new_status)
+                    
+                    if new_status == "Omitido":
+                        status_item.setForeground(QColor("darkorange")) 
+                    else:
+                        theme = self.config_manager.get_theme()
+                        status_item.setForeground(QColor(STYLE_STEAM_DECK["dark_palette"]["text"]) if theme == "dark" else QColor(STYLE_STEAM_DECK["light_palette"]["text"]))
+            else:
+                print(f"DEBUG: El elemento de estado es None para la fila {row}, columna 3 cuando la casilla de verificacion cambio. Saltando setText.")
+
+        self.items_table.itemChanged.connect(self.on_table_item_changed)
+        self.update_installation_button_state()
+
+    def update_silent_mode_session(self, state: int):
+        self.silent_mode = state == Qt.Checked
+
+    def update_force_mode_session(self, state: int):
+        self.force_mode = state == Qt.Checked
 
     def closeEvent(self, event):
+        """Guarda el tamano de la ventana al cerrar."""
         self.config_manager.save_window_size(self.size())
         super().closeEvent(event)
 
     def configure_environments(self):
+        """Abre el dialogo para configurar entornos de Wine/Proton."""
         dialog = ConfigDialog(self.config_manager, self)
-        dialog.config_saved.connect(self.update_config_info)  # Cambiado de update_config_label a update_config_info
+        dialog.config_saved.connect(self.update_config_info)
         dialog.exec_()
         self.update_config_info() 
 
     def update_config_info(self):
-        current = self.config_manager.configs["last_used"]
-        config = self.config_manager.get_config(current)
+        """Actualiza la informacion del entorno actual en la GUI."""
+        current_config_name = self.config_manager.configs.get("last_used", "Wine-System")
+        config = self.config_manager.get_config(current_config_name)
 
         if not config:
-            self.config_label.setText("No hay configuración seleccionada")
+            self.lbl_config.setText("No se ha seleccionado ninguna configuracion o la configuracion es invalida.")
             return
 
-        env = self.config_manager.get_current_env(current)
-        version = env.get("PROTON_VERSION") if config.get("type") == "proton" else env.get("WINE_VERSION", "Desconocida")
-        wine_version_in_proton = env.get("WINE_VERSION_IN_PROTON", "Desconocida")
+        try:
+            env = self.config_manager.get_current_environment(current_config_name)
+            version = env.get("PROTON_VERSION") if config.get("type") == "proton" else env.get("WINE_VERSION", "Desconocida")
+            wine_version_in_proton = env.get("WINE_VERSION_IN_PROTON", "N/A")
 
-        # Usar colores fijos (no basados en el tema actual)
-        text = [
-            f"<b>Configuración actual:</b> {current}",
-            f"<b>Tipo:</b> {'Proton' if config.get('type') == 'proton' else 'Wine'}",
-            f"<b>Versión:</b> <span style='color: #27ae60; font-weight: bold;'>{version}</span>",
-        ]
+            text = [
+                f"<b>Configuracion Actual:</b> {current_config_name}",
+                f"<b>Tipo:</b> {'Proton' if config.get('type') == 'proton' else 'Wine'}",
+                f"<b>Version Detectada:</b> <span style='color: #27ae60; font-weight: bold;'>{version}</span>",
+            ]
 
-        if config.get('type') == 'proton':
+            if config.get('type') == 'proton':
+                text.extend([
+                    f"<b>Wine en Proton:</b> <span style='color: #27ae60; font-weight: bold;'>{wine_version_in_proton}</span>",
+                    f"<b>Directorio de Proton:</b> {config.get('proton_dir', 'No especificado')}"
+                ])
+            else:
+                wine_dir = config.get('wine_dir', 'Sistema (PATH)')
+                text.extend([
+                    f"<b>Directorio de Wine:</b> {wine_dir}"
+                ])
+
             text.extend([
-                f"<b>Wine en Proton:</b> <span style='color: #27ae60; font-weight: bold;'>{wine_version_in_proton}</span>",
-                f"<b>Directorio Proton:</b> {config.get('proton_dir', 'No especificado')}"
-            ])
-        else:
-            wine_dir = config.get('wine_dir', 'Sistema')
-            text.extend([
-                f"<b>Directorio Wine:</b> {wine_dir}"
+                f"<b>Arquitectura:</b> {config.get('arch', 'win64')}",
+                f"<b>Prefijo:</b> <span style='color: #FFB347; font-weight: bold;'>{config.get('prefix', 'No especificado')}</span>"
             ])
 
-        text.extend([
-            f"<b>Arquitectura:</b> {config.get('arch', 'win64')}",
-            f"<b>Prefix:</b> <span style='color: #FFB347; font-weight: bold;'>{config.get('prefix', 'No especificado')}"
-        ])
+            self.lbl_config.setText("<br>".join(text))
+        except FileNotFoundError as e:
+            self.lbl_config.setText(f"ERROR: {str(e)}<br>Por favor, revisa la configuracion.")
+            QMessageBox.critical(self, "Error de Configuracion", str(e))
+        except Exception as e:
+            self.lbl_config.setText(f"ERROR: No se pudo obtener informacion de configuracion: {str(e)}")
 
-        self.config_label.setText("<br>".join(text))
-    
-    def on_item_check_changed(self, item):
-        if item.column() == 0:  # Es la columna del checkbox
-            row = item.row()
-            status_item = self.items_table.item(row, 3)
-            if status_item:
-                if item.checkState() == Qt.Checked:
-                    status_item.setText("Pendiente")
-                else:
-                    status_item.setText("Omitido")
-    
+
     def add_custom_program(self):
-        dialog = CustomProgramDialog(self)
+        """Abre el dialogo para anadir un nuevo programa/script personalizado."""
+        dialog = CustomProgramDialog(self.config_manager, self)
         if dialog.exec_() == QDialog.Accepted:
             try:
                 program_info = dialog.get_program_info()
-                program_path = program_info["path"]  # Ruta completa o comando Winetricks
-                program_name = program_info["name"]
-                program_type = program_info["type"]
-
-                display_type = "EXE" if program_type == "exe" else "Winetricks"
                 
-                # Verificar si ya está instalado
-                current_config = self.config_manager.configs["last_used"]
-                config = self.config_manager.get_config(current_config)
-                installed_components = []
+                current_paths_in_table = [item['path'] for item in self.items_for_installation]
+                if program_info['path'] in current_paths_in_table:
+                    QMessageBox.warning(self, "Duplicado", f"El programa '{program_info['name']}' ya esta en la lista de instalacion.")
+                    return
+                
+                current_config_name = self.config_manager.configs["last_used"]
+                config = self.config_manager.get_config(current_config_name)
                 
                 if config and "prefix" in config:
-                    installed_components = self.config_manager.get_installed_winetricks(config["prefix"])
+                    installed_items = self.config_manager.get_installed_winetricks(config["prefix"])
+                    
+                    if program_info["type"] == "winetricks" and program_info["path"] in installed_items:
+                        reply = QMessageBox.question(self, "Componente ya instalado",
+                                                     f"El componente '{program_info['path']}' ya esta registrado como instalado en este prefijo. Deseas agregarlo a la lista de instalacion de todos modos?",
+                                                     QMessageBox.Yes | QMessageBox.No)
+                        if reply == QMessageBox.No: return
+                    
+                    elif program_info["type"] == "exe":
+                        exe_filename = Path(program_info["path"]).name
+                        if exe_filename in installed_items:
+                            reply = QMessageBox.question(self, "Programa ya instalado",
+                                                         f"El programa '{exe_filename}' ya esta registrado como instalado en este prefijo. Deseas agregarlo a la lista de instalacion de todos modos?",
+                                                         QMessageBox.Yes | QMessageBox.No)
+                            if reply == QMessageBox.No: return
+                    elif program_info["type"] == "wtr":
+                        wtr_filename = Path(program_info["path"]).name
+                        if wtr_filename in installed_items:
+                             reply = QMessageBox.question(self, "Script ya ejecutado",
+                                                          f"El script '{wtr_filename}' ya esta registrado como ejecutado en este prefijo. Deseas agregarlo a la lista de instalacion de todos modos?",
+                                                          QMessageBox.Yes | QMessageBox.No)
+                             if reply == QMessageBox.No: return
                 
-                # Para winetricks, usar el nombre del componente
-                if program_type == "winetricks":
-                    component_name = program_path
-                    if component_name in installed_components:
-                        reply = QMessageBox.question(
-                            self,
-                            "Componente ya instalado",
-                            f"El componente '{component_name}' ya está instalado en este prefix. ¿Deseas instalarlo de todos modos?",
-                            QMessageBox.Yes | QMessageBox.No
-                        )
-                        if reply == QMessageBox.No:
-                            return
-                # Para EXE, usar el nombre del archivo
-                else:
-                    exe_name = Path(program_path).name
-                    if exe_name in installed_components:
-                        reply = QMessageBox.question(
-                            self,
-                            "Programa ya instalado",
-                            f"El programa '{exe_name}' ya está instalado en este prefix. ¿Deseas instalarlo de todos modos?",
-                            QMessageBox.Yes | QMessageBox.No
-                        )
-                        if reply == QMessageBox.No:
-                            return
+                self.config_manager.add_custom_program(program_info) 
+                self.add_item_to_table(program_info) 
+                self.update_installation_button_state()
                 
-                # Añadir a las listas internas (usando el path/command exacto)
-                self.custom_programs.append(program_path)
-                self.custom_program_types.append(program_type)
-                
-                # Mostrar en la tabla
-                self.add_item_to_table(program_name, display_type)
-                self.update_install_button()
-                
-                # Guardar en config.json
-                program_data = {
-                    "name": program_name,
-                    "path": program_path,  # Guardamos el path/command exacto
-                    "type": program_type
-                }
-                if "custom_programs" not in self.config_manager.configs:
-                    self.config_manager.configs["custom_programs"] = []
-                self.config_manager.configs["custom_programs"].append(program_data)
-                self.config_manager.save_configs()
-                
+            except ValueError as e:
+                QMessageBox.warning(self, "Entrada Invalida", str(e))
+            except FileNotFoundError as e:
+                QMessageBox.warning(self, "Archivo no Encontrado", str(e))
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Error al añadir programa:\n{str(e)}")
-                
-    def add_item_to_table(self, name, item_type, status="Pendiente", command=None):
-        row = self.items_table.rowCount()
-        self.items_table.insertRow(row)
+                QMessageBox.critical(self, "Error", f"Error al anadir programa: {str(e)}")
+
+    def add_item_to_table(self, program_data: dict):
+        """Añade un elemento a la tabla de instalación."""
+        # Disconnect signal to prevent unintended triggers during programmatic changes
+        try:
+            self.items_table.itemChanged.disconnect(self.on_table_item_changed)
+        except TypeError:
+            pass
         
-        # Checkbox
-        checkbox = QTableWidgetItem()
-        checkbox.setFlags(checkbox.flags() | Qt.ItemIsUserCheckable)
-        checkbox.setCheckState(Qt.Checked)
-        self.items_table.setItem(row, 0, checkbox)
+        row_count = self.items_table.rowCount()
+        self.items_table.insertRow(row_count)
         
-        # Nombre
-        name_item = QTableWidgetItem(name)
+        checkbox_item = QTableWidgetItem()
+        checkbox_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+        checkbox_item.setCheckState(Qt.Checked)
+        self.items_table.setItem(row_count, 0, checkbox_item)
+        
+        name_item = QTableWidgetItem(program_data["name"])
         name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
-        self.items_table.setItem(row, 1, name_item)
+        self.items_table.setItem(row_count, 1, name_item)
         
-        # Tipo
-        type_item = QTableWidgetItem(item_type)
+        type_text = program_data["type"].upper()
+        type_item = QTableWidgetItem(type_text)
         type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
-        self.items_table.setItem(row, 2, type_item)
+        self.items_table.setItem(row_count, 2, type_item)
         
-        # Estado
-        status_item = QTableWidgetItem(status)
+        status_item = QTableWidgetItem("Pendiente")
         status_item.setFlags(status_item.flags() & ~Qt.ItemIsEditable)
-        self.items_table.setItem(row, 3, status_item)
-    
-    def update_silent_mode(self, state):
-        self.silent_mode = state == Qt.Checked
-        self.config_manager.set_silent_install(self.silent_mode)
+        self.items_table.setItem(row_count, 3, status_item)
+        
+        # Add 'status' directly to the program_data dictionary for the internal model
+        program_data['current_status'] = "Pendiente" 
+        self.items_for_installation.append(program_data)
+        
+        self.update_installation_button_state()
+
+        # Reconnect the signal after all programmatic changes for the row are done
+        self.items_table.itemChanged.connect(self.on_table_item_changed)
 
     def manage_custom_programs(self):
+        """Abre el dialogo para gestionar (cargar/eliminar) programas personalizados."""
         dialog = ManageProgramsDialog(self.config_manager, self)
         if dialog.exec_() == QDialog.Accepted:
-            selected_programs = dialog.get_selected_programs()
-            
-            if not selected_programs:
-                return
-                
-            # Verificar duplicados antes de añadir
-            current_config = self.config_manager.configs["last_used"]
-            config = self.config_manager.get_config(current_config)
-            installed_components = []
-            
-            if config and "prefix" in config:
-                installed_components = self.config_manager.get_installed_winetricks(config["prefix"])
-            
-            for program in selected_programs:
-                # Verificar si ya está instalado
-                if program["type"] == "winetricks":
-                    component_name = program["path"]
-                    if component_name in installed_components:
-                        reply = QMessageBox.question(
-                            self,
-                            "Componente ya instalado",
-                            f"El componente '{component_name}' ya está instalado en este prefix. ¿Deseas instalarlo de todos modos?",
-                            QMessageBox.Yes | QMessageBox.No
-                        )
-                        if reply == QMessageBox.No:
-                            continue
-                else:
-                    exe_name = Path(program["path"]).name
-                    if exe_name in installed_components:
-                        reply = QMessageBox.question(
-                            self,
-                            "Programa ya instalado",
-                            f"El programa '{exe_name}' ya está instalado en este prefix. ¿Deseas instalarlo de todos modos?",
-                            QMessageBox.Yes | QMessageBox.No
-                        )
-                        if reply == QMessageBox.No:
-                            continue
-                
-                # Añadir a la lista de instalación
-                self.custom_programs.append(program["path"])
-                self.custom_program_types.append(program["type"])
-                display_type = "EXE" if program["type"] == "exe" else "Winetricks"
-                self.add_item_to_table(program['name'], display_type)
-            
-            self.update_install_button()
-            # No cerramos la ventana de gestión para permitir más selecciones
+            selected_programs = dialog.get_selected_programs_to_load()
+            for program_info in selected_programs:
+                if program_info not in self.items_for_installation:
+                    self.add_item_to_table(program_info)
+            self.update_installation_button_state()
 
     def select_components(self):
+        """Abre el dialogo para seleccionar componentes de Winetricks."""
         component_groups = {
-            "Bibliotecas Visual Basic": ["vb2run", "vb3run", "vb4run", "vb5run", "vb6run"],
-            "Visual C++ Runtime": [
+            "Librerias de Visual Basic": ["vb2run", "vb3run", "vb4run", "vb5run", "vb6run"],
+            "Tiempo de Ejecucion de Visual C++": [
                 "vcrun6", "vcrun6sp6", "vcrun2003", "vcrun2005", "vcrun2008",
                 "vcrun2010", "vcrun2012", "vcrun2013", "vcrun2015", "vcrun2017",
                 "vcrun2019", "vcrun2022"
             ],
-            ".NET Framework": [
+            "Framework .NET": [
                 "dotnet11", "dotnet11sp1", "dotnet20", "dotnet20sp1", "dotnet20sp2",
                 "dotnet30", "dotnet30sp1", "dotnet35", "dotnet35sp1", "dotnet40",
                 "dotnet40_kb2468871", "dotnet45", "dotnet452", "dotnet46", "dotnet461",
@@ -478,7 +486,7 @@ class InstallerApp(QWidget):
                 "qcap", "qdvd", "qedit", "quartz", "quartz_feb2010", "quicktime72",
                 "quicktime76", "wmp9", "wmp10", "wmp11", "wmv9vcm", "xvid"
             ],
-            "Componentes de Sistema": [
+            "Componentes del Sistema": [
                 "amstream", "atmlib", "cabinet", "cmd", "comctl32", "comctl32ocx",
                 "comdlg32ocx", "crypt32", "crypt32_winxp", "dbghelp", "esent", "filever",
                 "gdiplus", "gdiplus_winxp", "glidewrapper", "glut", "gmdls", "hid",
@@ -506,391 +514,436 @@ class InstallerApp(QWidget):
             ]
         }
 
-        dialog = SelectGroupsDialog(component_groups)
+        dialog = SelectGroupsDialog(component_groups, self.config_manager, self) 
         if dialog.exec_() == QDialog.Accepted:
             selected_components = dialog.get_selected_components()
             
-            current_config = self.config_manager.configs["last_used"]
-            config = self.config_manager.get_config(current_config)
+            current_config_name = self.config_manager.configs["last_used"]
+            config = self.config_manager.get_config(current_config_name)
             installed_components = []
-            
             if config and "prefix" in config:
                 installed_components = self.config_manager.get_installed_winetricks(config["prefix"])
-            
-            for comp in selected_components:
-                if comp in installed_components:
-                    reply = QMessageBox.question(
-                        self,
-                        "Componente ya instalado",
-                        f"El componente '{comp}' ya está instalado en este prefix. ¿Deseas instalarlo de todos modos?",
-                        QMessageBox.Yes | QMessageBox.No
-                    )
+                
+            for comp_name in selected_components:
+                if any(item.get('path') == comp_name and item.get('type') == 'winetricks' for item in self.items_for_installation):
+                    QMessageBox.warning(self, "Duplicado", f"El componente '{comp_name}' ya esta en la lista de instalacion.")
+                    continue
+
+                if comp_name in installed_components:
+                    reply = QMessageBox.question(self, "Componente ya instalado",
+                                                 f"El componente '{comp_name}' ya esta registrado como instalado en este prefijo. Deseas agregarlo a la lista de instalacion de todos modos?",
+                                                 QMessageBox.Yes | QMessageBox.No)
                     if reply == QMessageBox.No:
                         continue
-                
-                self.selected_components.append(comp)
-                self.add_item_to_table(comp, "Winetricks")
-            self.update_install_button()
+                    
+                self.add_item_to_table({"name": comp_name, "path": comp_name, "type": "winetricks"})
+            self.update_installation_button_state()
+
+    def cancel_installation(self):
+        """
+        Detiene la instalacion actual si hay un hilo instalador en ejecucion.
+        Pide confirmacion al usuario antes de cancelar.
+        """
+        if self.installer_thread and self.installer_thread.isRunning():
+            reply = QMessageBox.question(
+                self, "Confirmar Cancelacion",
+                "Estas seguro de que quieres cancelar la instalacion en curso?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self.installer_thread.stop() 
+                self.installer_thread.wait() 
+                QMessageBox.information(self, "Cancelado", "La instalacion ha sido cancelada por el usuario.")
+        else:
+            QMessageBox.information(self, "Informacion", "No hay ninguna instalacion en progreso para cancelar.")
 
     def clear_list(self):
-        # Limpiar la lista como antes
-        self.items_table.setRowCount(0)
-        self.selected_components = []
-        self.custom_programs = []
-        self.custom_program_types = []
-        
-        # Restablecer los botones a su estado normal
-        self.install_btn.setEnabled(False)
-        self.add_custom_btn.setEnabled(True)
-        self.manage_custom_btn.setEnabled(True)
-        self.select_components_btn.setEnabled(True)
-        
-        # Actualizar estado del botón de instalación
-        self.update_install_button()
+        """Borra la tabla y el modelo de datos interno, restableciendo los estados de los botones."""
+        reply = QMessageBox.question(self, "Confirmar", "Estas seguro de que quieres borrar toda la lista de instalacion?",
+                                     QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            self.items_table.setRowCount(0)
+            self.items_for_installation.clear()
+            self.update_installation_button_state()
 
-    def remove_selected(self):
-        selected_rows = set()
-        for index in self.items_table.selectedIndexes():
-            selected_rows.add(index.row())
+    def delete_selected_from_table(self):
+        """Elimina los elementos seleccionados de la tabla y el modelo de datos interno."""
+        selected_rows = sorted(list(set(index.row() for index in self.items_table.selectedIndexes())), reverse=True)
         
         if not selected_rows:
+            QMessageBox.warning(self, "Advertencia", "No se seleccionaron elementos para eliminar.")
             return
 
-        for row in sorted(selected_rows, reverse=True):
-            item_name = self.items_table.item(row, 1).text()
-            
-            if item_name in self.selected_components:
-                self.selected_components.remove(item_name)
-            else:
-                for i, prog in enumerate(self.custom_programs[:]):
-                    if item_name in prog:
-                        del self.custom_programs[i]
-                        del self.custom_program_types[i]
-                        break
-            
-            self.items_table.removeRow(row)
+        reply = QMessageBox.question(self, "Confirmar Eliminacion", 
+                                     f"Estas seguro de que quieres eliminar {len(selected_rows)} elemento(s) de la lista de instalacion?",
+                                     QMessageBox.Yes | QMessageBox.No)
         
-        self.update_install_button()
+        if reply == QMessageBox.Yes:
+            self.items_table.itemChanged.disconnect(self.on_table_item_changed)
+            
+            for row in selected_rows:
+                if 0 <= row < len(self.items_for_installation):
+                    del self.items_for_installation[row]
+                self.items_table.removeRow(row)
+                
+            self.items_table.itemChanged.connect(self.on_table_item_changed)
+            self.update_installation_button_state()
 
     def move_item_up(self):
-        selected_rows = set()
-        for index in self.items_table.selectedIndexes():
-            selected_rows.add(index.row())
+        selected_rows = sorted(list(set(index.row() for index in self.items_table.selectedIndexes())))
         
-        if not selected_rows or len(selected_rows) > 1:
+        if len(selected_rows) != 1:
+            QMessageBox.warning(self, "Advertencia", "Selecciona solo un elemento para mover.")
             return
 
-        current_row = list(selected_rows)[0]
+        current_row = selected_rows[0]
         if current_row > 0:
+            self.items_table.itemChanged.disconnect(self.on_table_item_changed)
             self.swap_table_rows(current_row, current_row - 1)
+            self.items_for_installation[current_row], self.items_for_installation[current_row - 1] = \
+                self.items_for_installation[current_row - 1], self.items_for_installation[current_row]
             self.items_table.selectRow(current_row - 1)
-            self._reorder_internal_lists()
+            self.items_table.itemChanged.connect(self.on_table_item_changed)
+
 
     def move_item_down(self):
-        selected_rows = set()
-        for index in self.items_table.selectedIndexes():
-            selected_rows.add(index.row())
+        selected_rows = sorted(list(set(index.row() for index in self.items_table.selectedIndexes())))
         
-        if not selected_rows or len(selected_rows) > 1:
+        if len(selected_rows) != 1:
+            QMessageBox.warning(self, "Advertencia", "Selecciona solo un elemento para mover.")
             return
 
-        current_row = list(selected_rows)[0]
+        current_row = selected_rows[0]
         if current_row < self.items_table.rowCount() - 1:
+            self.items_table.itemChanged.disconnect(self.on_table_item_changed)
             self.swap_table_rows(current_row, current_row + 1)
+            self.items_for_installation[current_row], self.items_for_installation[current_row + 1] = \
+                self.items_for_installation[current_row + 1], self.items_for_installation[current_row]
             self.items_table.selectRow(current_row + 1)
-            self._reorder_internal_lists()
+            self.items_table.itemChanged.connect(self.on_table_item_changed)
 
-    def swap_table_rows(self, row1, row2):
+    def swap_table_rows(self, row1: int, row2: int):
+        row1_items = [self.items_table.takeItem(row1, col) for col in range(self.items_table.columnCount())]
+        row2_items = [self.items_table.takeItem(row2, col) for col in range(self.items_table.columnCount())]
+
         for col in range(self.items_table.columnCount()):
-            item1 = self.items_table.takeItem(row1, col)
-            item2 = self.items_table.takeItem(row2, col)
-            self.items_table.setItem(row2, col, item1)
-            self.items_table.setItem(row1, col, item2)
+            self.items_table.setItem(row2, col, row1_items[col])
+            self.items_table.setItem(row1, col, row2_items[col])
 
-    def _reorder_internal_lists(self):
-        new_selected_components = []
-        new_custom_programs = []
-        new_custom_program_types = []
-        
+    def update_installation_button_state(self):
+        """Habilita/deshabilita el boton de instalacion si hay elementos marcados."""
+        any_checked = False
         for row in range(self.items_table.rowCount()):
-            item_name = self.items_table.item(row, 1).text()
-            item_type = self.items_table.item(row, 2).text()
-            
-            if item_type == "Winetricks":
-                new_selected_components.append(item_name)
-            else:
-                for i, prog in enumerate(self.custom_programs):
-                    if item_name in prog:
-                        new_custom_programs.append(prog)
-                        new_custom_program_types.append(self.custom_program_types[i])
-                        break
-        
-        self.selected_components = new_selected_components
-        self.custom_programs = new_custom_programs
-        self.custom_program_types = new_custom_program_types
-
-    def update_install_button(self):
-        self.install_btn.setEnabled(self.items_table.rowCount() > 0)
+            if self.items_table.item(row, 0).checkState() == Qt.Checked:
+                any_checked = True
+                break
+        self.btn_install.setEnabled(any_checked)
 
     def start_installation(self):
-        current_config = self.config_manager.configs["last_used"]
-        config = self.config_manager.get_config(current_config)
+        """Inicia el proceso de instalación de los elementos seleccionados."""
+        current_config_name = self.config_manager.configs.get("last_used")
+        config = self.config_manager.get_config(current_config_name)
 
         if not config:
-            QMessageBox.critical(self, "Error", "No hay configuración seleccionada")
+            QMessageBox.critical(self, "Error", "No se ha seleccionado ninguna configuración de Wine/Proton o es inválida.")
+            return
+
+        items_to_process_data_for_thread = []
+        for row in range(self.items_table.rowCount()):
+            item_data = self.items_for_installation[row]
+            checkbox_item = self.items_table.item(row, 0)
+
+            if checkbox_item.checkState() == Qt.Checked:
+                # IMPORTANT: Now pass the user_defined_name as the third element
+                items_to_process_data_for_thread.append((item_data['path'], item_data['type'], item_data['name']))
+                item_data['current_status'] = "Pendiente" 
+                self.items_table.item(row, 3).setText("Pendiente") 
+                self.items_table.item(row, 3).setForeground(QColor(STYLE_STEAM_DECK["dark_palette"]["text"]) if self.config_manager.get_theme() == "dark" else QColor(STYLE_STEAM_DECK["light_palette"]["text"]))
+            else:
+                item_data['current_status'] = "Omitido"
+                self.items_table.item(row, 3).setText("Omitido")
+                self.items_table.item(row, 3).setForeground(QColor("darkorange"))
+
+
+        if not items_to_process_data_for_thread:
+            QMessageBox.warning(self, "Advertencia", "No se seleccionaron elementos para instalar. Marca los elementos que deseas instalar.")
             return
 
         prefix_path = Path(config["prefix"])
         if not prefix_path.exists():
             reply = QMessageBox.question(
-                self,
-                "Prefix no encontrado",
-                f"El prefix {config['prefix']} no existe. ¿Deseas crearlo?",
+                self, "Prefijo No Encontrado",
+                f"El prefijo de Wine/Proton en '{config['prefix']}' no existe. ¿Deseas crearlo ahora? Esto inicializará el prefijo.",
                 QMessageBox.Yes | QMessageBox.No
             )
             if reply == QMessageBox.Yes:
                 try:
-                    prefix_path.mkdir(parents=True, exist_ok=True, mode=0o755)
-                    env = self.config_manager.get_current_env(current_config)
-
-                    if config["type"] == "proton":
-                        proton_dir = Path(config["proton_dir"])
-                        wine_bin = str(proton_dir / "files/bin/wine")
-                    else:
-                        wine_dir = config.get("wine_dir")
-                        if wine_dir:
-                            wine_bin = str(Path(wine_dir) / "bin/wine")
-                        else:
-                            wine_bin = "wine"
-
-                    subprocess.run(
-                        ["konsole", "--noclose", "-e", wine_bin, "wineboot"],
-                        env=env,
-                        check=True
-                    )
+                    self._create_prefix(config, current_config_name, prefix_path)
+                    QMessageBox.information(self, "Prefijo Creado", "El prefijo de Wine/Proton ha sido creado exitosamente.")
                 except Exception as e:
-                    QMessageBox.critical(
-                        self,
-                        "Error",
-                        f"No se pudo crear el prefix: {str(e)}"
-                    )
+                    QMessageBox.critical(self, "Error", f"No se pudo crear el prefijo:\n{str(e)}")
                     return
             else:
-                return
+                return 
 
-        env = self.config_manager.get_current_env(current_config)
+        try:
+            env = self.config_manager.get_current_environment(current_config_name)
+        except Exception as e:
+            QMessageBox.critical(self, "Error de Entorno", f"No se pudo configurar el entorno para la instalación:\n{str(e)}")
+            return
+            
+        self.installer_thread = InstallerThread(
+            items_to_process_data_for_thread, # Pass the filtered and prepared list in new format
+            env,
+            silent_mode=self.silent_mode,
+            force_mode=self.force_mode, 
+            winetricks_path=self.config_manager.get_winetricks_path(),
+            config_manager=self.config_manager
+        )
         
-        all_items = []
-        all_types = []
-        
-        for row in range(self.items_table.rowCount()):
-            # Verificar si el elemento está marcado para instalación
-            checkbox_item = self.items_table.item(row, 0)
-            if checkbox_item.checkState() != Qt.Checked:
-                self.items_table.item(row, 3).setText("Omitido")
-                continue
-                
-            item_name = self.items_table.item(row, 1).text()  # Nombre mostrado en la tabla
-            item_type = self.items_table.item(row, 2).text().lower()  # "exe" o "winetricks"
-            
-            # Buscamos el programa en config.json por su nombre
-            custom_programs = self.config_manager.get_custom_programs()
-            program_info = next((p for p in custom_programs if p['name'] == item_name), None)
-            
-            if program_info:
-                # Usamos el path exacto guardado en config.json
-                all_items.append(program_info['path'])
-                all_types.append(program_info['type'])
-            else:
-                # Si no está en custom_programs, es un componente Winetricks seleccionado manualmente
-                all_items.append(item_name)
-                all_types.append("winetricks")
-            
-            self.items_table.item(row, 3).setText("Pendiente")
+        self.installer_thread.progress.connect(self.update_progress)
+        self.installer_thread.finished.connect(self.installation_finished)
+        self.installer_thread.error.connect(self.show_installation_error)
+        self.installer_thread.canceled.connect(self.on_installation_canceled)
 
-        if all_items:
-            self.installer_thread = InstallerThread(
-                all_items,
-                env,
-                item_types=all_types,
-                silent_mode=self.silent_mode,
-                winetricks_path=self.config_manager.get_winetricks_path(),
-                config_manager=self.config_manager
+        self.btn_install.setEnabled(False)
+        self.btn_cancel.setEnabled(True)
+        self.btn_select_components.setEnabled(False)
+        self.btn_add_custom.setEnabled(False)
+        self.btn_manage_custom.setEnabled(False)
+        
+        self.installer_thread.start()
+
+    def _create_prefix(self, config: dict, config_name: str, prefix_path: Path):
+        """Crea un nuevo prefijo de Wine/Proton y lo inicializa."""
+        prefix_path.mkdir(parents=True, exist_ok=True, mode=0o755)
+        env = self.config_manager.get_current_environment(config_name)
+
+        wine_executable = env.get("WINE")
+        if not wine_executable or not Path(wine_executable).is_file():
+            raise FileNotFoundError(f"Ejecutable de Wine no encontrado: {wine_executable}")
+
+        progress_dialog = QProgressDialog("Inicializando Prefijo de Wine/Proton...", "Cancelar", 0, 0, self) 
+        progress_dialog.setWindowTitle("Inicializacion del Prefijo")
+        progress_dialog.setWindowModality(Qt.WindowModal)
+        progress_dialog.setCancelButton(None) 
+        progress_dialog.show() 
+
+        try:
+            process = subprocess.Popen(
+                ["konsole", "--noclose", "-e", wine_executable, "wineboot"],
+                env=env,
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT,
+                text=True
             )
-            self.installer_thread.progress.connect(self.update_progress)
-            self.installer_thread.finished.connect(self.installation_finished)
-            self.installer_thread.error.connect(self.show_error)
-            self.installer_thread.canceled.connect(self.on_installation_canceled)
+            log_output = ""
+            for line in process.stdout:
+                log_output += line
+                QApplication.processEvents() 
+            process.wait(timeout=60) 
+            
+            self.config_manager.write_to_log("Creacion del Prefijo", f"Salida de Wineboot para {config_name}:\n{log_output}")
+            
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(process.returncode, "wineboot", output=log_output)
 
-            self.install_btn.setEnabled(False)
-            self.cancel_btn.setEnabled(True)
-            self.installer_thread.start()
+        except subprocess.TimeoutExpired:
+            process.kill()
+            raise Exception("La inicializacion del prefijo de Wine/Proton agoto el tiempo de espera.")
+        except subprocess.CalledProcessError as e:
+            raise Exception(f"No se pudo inicializar el prefijo de Wine/Proton. Codigo de salida: {e.returncode}\nSalida: {e.output}")
+        finally:
+            progress_dialog.close()
 
-    def update_progress(self, idx, message):
-        self.items_table.item(idx, 3).setText(message)
+    def update_progress(self, name: str, status: str):
+        """Actualiza el estado de un elemento en la tabla y en el modelo interno."""
+        # First, update the internal data model
+        found_in_model = False
+        for item_data in self.items_for_installation:
+            # Match against the 'name' field in our internal model
+            if item_data['name'] == name:
+                item_data['current_status'] = status
+                found_in_model = True
+                break
+        
+        if not found_in_model:
+            print(f"DEBUG: Item '{name}' not found in internal items_for_installation list for status update.")
 
-    def on_installation_canceled(self, idx):
-        # Actualizar el estado del item en la fila idx a "Cancelado"
-        status_item = self.items_table.item(idx, 3)
-        if status_item:
-            status_item.setText("Cancelado")
+        # Then, update the table's visual representation
+        for row in range(self.items_table.rowCount()):
+            # Match by the displayed name in the table
+            if self.items_table.item(row, 1).text() == name:
+                status_item = self.items_table.item(row, 3)
+                if status_item: # Ensure item exists
+                    status_item.setText(status)
+                    if "Error" in status:
+                        status_item.setForeground(QColor(255, 0, 0)) # Red
+                    elif "Finalizado" in status:
+                        status_item.setForeground(QColor(0, 128, 0)) # Green
+                    elif "Cancelado" in status:
+                        status_item.setForeground(QColor("orange")) # Orange
+                    else: # Pending, Installing...
+                        theme = self.config_manager.get_theme()
+                        status_item.setForeground(QColor(STYLE_STEAM_DECK["dark_palette"]["text"]) if theme == "dark" else QColor(STYLE_STEAM_DECK["light_palette"]["text"]))
+                else:
+                    print(f"DEBUG: Status item is None for row {row}, name '{name}'.")
+                break # Stop after finding and updating the item in the table
+
+    def on_installation_canceled(self, item_name: str):
+        """Actualiza el estado de un elemento cuando la instalación es cancelada."""
+        # Update internal model
+        for item_data in self.items_for_installation:
+            if item_data['name'] == item_name:
+                item_data['current_status'] = "Cancelado"
+                break
+
+        # Update table display
+        for row in range(self.items_table.rowCount()):
+            if self.items_table.item(row, 1).text() == item_name:
+                status_item = self.items_table.item(row, 3)
+                checkbox_item = self.items_table.item(row, 0)
+                if status_item:
+                    status_item.setText("Cancelado")
+                    status_item.setForeground(QColor("orange"))
+                if checkbox_item:
+                    checkbox_item.setCheckState(Qt.Checked) # Keep checked to allow re-attempt
+                break
 
     def installation_finished(self):
-        # Mostrar mensaje de completado pero NO limpiar la lista
-        QMessageBox.information(self, "Completado", "Instalación finalizada. Limpie la lista para instalar nuevos programas.")
+        """Maneja el estado final de la instalación, actualizando la GUI y mostrando un resumen."""
+        installed_count = 0
+        failed_count = 0
+        skipped_count = 0
         
-        # Deshabilitar botones relevantes
-        self.install_btn.setEnabled(False)
-        self.add_custom_btn.setEnabled(False)
-        self.manage_custom_btn.setEnabled(False)
-        self.select_components_btn.setEnabled(False)
-        
-        # Habilitar solo el botón de limpiar
-        self.cancel_btn.setEnabled(False)
+        # Disconnect itemChanged signal to prevent unintended updates when updating checkboxes
+        try:
+            self.items_table.itemChanged.disconnect(self.on_table_item_changed)
+        except TypeError:
+            pass
 
-    def reset_ui(self):
-        # Solo deshabilitar los botones de instalación/cancelación
-        self.install_btn.setEnabled(False)
-        self.cancel_btn.setEnabled(False)
-        # No cambiar el estado de los otros botones aquí
+        # Iterate through the *internal data model* (self.items_for_installation)
+        # to get accurate counts and update table checkboxes
+        for row, item_data in enumerate(self.items_for_installation):
+            current_status = item_data['current_status']
+            checkbox_item = self.items_table.item(row, 0) # Get the checkbox for the corresponding row
 
-    def show_error(self, message):
-        QMessageBox.critical(self, "Error", message)
-        # Solo resetear la UI parcialmente
-        self.install_btn.setEnabled(False)
-        self.cancel_btn.setEnabled(False)
+            if "Finalizado" in current_status:
+                installed_count += 1
+                if checkbox_item:
+                    checkbox_item.setCheckState(Qt.Unchecked) # Desmarcar elementos exitosos
+            elif "Error" in current_status or "Cancelado" in current_status:
+                failed_count += 1
+                if checkbox_item:
+                    checkbox_item.setCheckState(Qt.Checked) # Keep checkbox checked for failed/canceled items, so user can retry
+            elif "Omitido" in current_status:
+                skipped_count += 1
+                if checkbox_item:
+                    checkbox_item.setCheckState(Qt.Unchecked) # Keep checkbox unchecked for skipped items
 
-    def cancel_installation(self):
-        if self.installer_thread and self.installer_thread.isRunning():
-            reply = QMessageBox.question(
-                self, "Confirmar",
-                "¿Estás seguro de que deseas cancelar la instalación?",
-                QMessageBox.Yes | QMessageBox.No
-            )
+        # Reconnect the signal
+        self.items_table.itemChanged.connect(self.on_table_item_changed)
 
-            if reply == QMessageBox.Yes:
-                self.installer_thread.stop()
-                self.installer_thread.wait()
-                self.reset_ui()
+        # Re-enable controls
+        self.btn_install.setEnabled(True)
+        self.btn_cancel.setEnabled(False)
+        self.btn_select_components.setEnabled(True)
+        self.btn_add_custom.setEnabled(True)
+        self.btn_manage_custom.setEnabled(True)
+
+        QMessageBox.information(
+            self,
+            "Instalacion Completada",
+            f"Resumen de la Instalacion:\n\n"
+            f"• Instalado exitosamente: {installed_count}\n"
+            f"• Fallido o Cancelado: {failed_count}\n"
+            f"• Omitido (no seleccionado): {skipped_count}\n\n"
+            f"Los elementos instalados exitosamente han sido deseleccionados de la lista."
+        )
+        self.update_installation_button_state()
+
+    def show_installation_error(self, message: str):
+        """Muestra un mensaje de error critico durante la instalacion y restablece los controles."""
+        QMessageBox.critical(self, "Error de Instalacion", message)
+        # Asegurarse de que los botones se vuelvan a habilitar despues de un error
+        self.btn_install.setEnabled(True)
+        self.btn_cancel.setEnabled(False)
+        self.btn_select_components.setEnabled(True)
+        self.btn_add_custom.setEnabled(True)
+        self.btn_manage_custom.setEnabled(True)
+        self.update_installation_button_state()
+
 
     def open_winetricks(self):
+        """Abre la GUI de Winetricks para el prefijo actual."""
         try:
-            current_config = self.config_manager.configs["last_used"]
-            env = self.config_manager.get_current_env(current_config)
-            
+            current_config_name = self.config_manager.configs["last_used"]
+            env = self.config_manager.get_current_environment(current_config_name)
             winetricks_path = self.config_manager.get_winetricks_path()
             
-            subprocess.Popen(
-                [winetricks_path, "--gui"],
-                env=env
-            )
+            subprocess.Popen([winetricks_path, "--gui"], env=env)
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"No se pudo abrir Winetricks: {str(e)}"
-            )
+            QMessageBox.critical(self, "Error", f"No se pudo abrir Winetricks: {str(e)}")
 
     def open_shell(self):
+        """Abre una terminal (Konsole) con el entorno de Wine/Proton configurado."""
         try:
-            current_config = self.config_manager.configs["last_used"]
-            env = self.config_manager.get_current_env(current_config)
+            current_config_name = self.config_manager.configs["last_used"]
+            env = self.config_manager.get_current_environment(current_config_name)
             subprocess.Popen(["konsole"], env=env)
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"No se pudo abrir la terminal: {str(e)}"
-            )
+            QMessageBox.critical(self, "Error", f"No se pudo abrir la terminal: {str(e)}")
             
     def open_prefix_folder(self):
+        """Abre la carpeta del prefijo de Wine/Proton en el explorador de archivos."""
         try:
-            current_config = self.config_manager.configs["last_used"]
-            config = self.config_manager.get_config(current_config)
+            current_config_name = self.config_manager.configs["last_used"]
+            config = self.config_manager.get_config(current_config_name)
             
             if config and "prefix" in config:
                 prefix_path = Path(config["prefix"])
                 if prefix_path.exists():
-                    subprocess.Popen(["xdg-open", str(prefix_path)])
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(prefix_path)))
                 else:
-                    QMessageBox.warning(
-                        self,
-                        "Advertencia",
-                        f"El prefix {config['prefix']} no existe"
-                    )
+                    QMessageBox.warning(self, "Advertencia", f"El prefijo '{prefix_path}' no existe. Por favor, asegurate de que este configurado o crealo.")
             else:
-                QMessageBox.warning(
-                    self,
-                    "Advertencia",
-                    "No hay un prefix configurado"
-                )
+                QMessageBox.warning(self, "Advertencia", "No hay ningun prefijo configurado para el entorno actual.")
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"No se pudo abrir el directorio: {str(e)}"
-            )
-    
+            QMessageBox.critical(self, "Error", f"No se pudo abrir la carpeta del prefijo: {str(e)}")
+            
     def open_explorer(self):
+        """Ejecuta wine explorer para el prefijo actual."""
         try:
-            current_config = self.config_manager.configs["last_used"]
-            config = self.config_manager.get_config(current_config)
+            current_config_name = self.config_manager.configs["last_used"]
+            config = self.config_manager.get_config(current_config_name)
             
             if config and "prefix" in config:
                 prefix_path = Path(config["prefix"])
                 if prefix_path.exists():
-                    env = self.config_manager.get_current_env(current_config)
+                    env = self.config_manager.get_current_environment(current_config_name)
+                    wine_executable = env.get("WINE")
                     
-                    if config.get("type") == "proton":
-                        proton_dir = Path(config["proton_dir"])
-                        wine_bin = str(proton_dir / "files/bin/wine")
-                    else:
-                        wine_dir = config.get("wine_dir")
-                        if wine_dir:
-                            wine_bin = str(Path(wine_dir) / "bin/wine")
-                        else:
-                            wine_bin = "wine"
+                    if not wine_executable or not Path(wine_executable).is_file():
+                        raise FileNotFoundError(f"Ejecutable de Wine no encontrado en el entorno: {wine_executable}")
                     
-                    subprocess.Popen(
-                        [wine_bin, "explorer"],
-                        env=env
-                    )
+                    subprocess.Popen([wine_executable, "explorer"], env=env)
                 else:
-                    QMessageBox.warning(
-                        self,
-                        "Advertencia",
-                        f"El prefix {config['prefix']} no existe"
-                    )
+                    QMessageBox.warning(self, "Advertencia", f"El prefijo '{prefix_path}' no existe. Por favor, asegurate de que este configurado o crealo.")
             else:
-                QMessageBox.warning(
-                    self,
-                    "Advertencia",
-                    "No hay un prefix configurado"
-                )
+                QMessageBox.warning(self, "Advertencia", "No hay ningun prefijo configurado para el entorno actual.")
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"No se pudo abrir el explorer: {str(e)}"
-            )
-    
-    def open_cfgwine(self):
+            QMessageBox.critical(self, "Error", f"No se pudo abrir el Explorador de Wine: {str(e)}")
+            
+    def open_winecfg(self):
+        """Ejecuta winecfg para el prefijo actual."""
         try:
-            current_config = self.config_manager.configs["last_used"]
-            env = self.config_manager.get_current_env(current_config)
+            current_config_name = self.config_manager.configs["last_used"]
+            env = self.config_manager.get_current_environment(current_config_name)
             
-            if "WINE" in env:
-                wine_bin = env["WINE"]
-            else:
-                wine_bin = "wine"
-            
-            subprocess.Popen(
-                [wine_bin, "winecfg"],
-                env=env
-            )
+            wine_executable = env.get("WINE")
+            if not wine_executable or not Path(wine_executable).is_file():
+                raise FileNotFoundError(f"Ejecutable de Wine no encontrado en el entorno: {wine_executable}")
+                
+            subprocess.Popen([wine_executable, "winecfg"], env=env)
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"No se pudo abrir cfgwine: {str(e)}"
-            )
+            QMessageBox.critical(self, "Error", f"No se pudo abrir Winecfg: {str(e)}")
