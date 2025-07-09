@@ -1,319 +1,263 @@
-import sys
 import os
-import subprocess
 import json
 import re
 import time
-import tempfile
-import ssl
-import tarfile
-import zipfile
-import shutil
+import subprocess
 from pathlib import Path
-from urllib.request import urlopen, Request
 
+from PyQt5.QtWidgets import QApplication, QWidget, QDialog, QFileDialog, QMessageBox, QTableWidget, QPushButton
+from PyQt5.QtGui import QPalette, QColor
 from PyQt5.QtCore import Qt, QSize
 
+from styles import STYLE_STEAM_DECK # Import the style constants
+
 class ConfigManager:
-    ssl._create_default_https_context = ssl._create_unverified_context
-    """Gestor optimizado de configuraciones persistentes"""
+    """
+    Gestor optimizado para configuraciones persistentes, incluyendo rutas, temas y repositorios.
+    Asegura la estructura basica de configuracion al inicio.
+    """
     def __init__(self):
-        config_dir = Path.home() / ".config" / "WineProtonManager"
-        self.config_file = config_dir / "config.json"
-        config_dir.mkdir(parents=True, exist_ok=True)
+        self.config_dir = Path.home() / ".config" / "WineProtonManager"
+        self.config_file = self.config_dir / "config.json"
+        self.config_dir.mkdir(parents=True, exist_ok=True)
         
-        # Crear directorio de logs si no existe
-        log_dir = config_dir / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir = self.config_dir / "logs"
+        self.log_dir.mkdir(parents=True, exist_ok=True)
         
-        # Directorios para descargas
-        self.wine_download_dir = config_dir / "Wine"
-        self.proton_download_dir = config_dir / "Proton"
+        self.wine_download_dir = self.config_dir / "Wine"
+        self.proton_download_dir = self.config_dir / "Proton"
         self.wine_download_dir.mkdir(exist_ok=True)
         self.proton_download_dir.mkdir(exist_ok=True)
+        self.programs_dir = self.config_dir / "Programas"
+        self.programs_dir.mkdir(exist_ok=True)
         
-        self.configs = self.load_configs()
-        self.ensure_default_config()
+        self.configs = self._load_configs()
+        self._ensure_default_config()
 
-    def ensure_default_config(self):
-        """Garantiza la existencia de configuraciones básicas"""
-        configs = self.configs.setdefault("configs", {})
-        self.configs.setdefault("last_used", "Wine-System")
+    def _ensure_default_config(self):
+        """Asegura que existan configuraciones basicas, inicializandolas si faltan."""
+        default_settings = {
+            "winetricks_path": str(Path(__file__).parent / "AppDir" / "usr" / "bin" / "winetricks"),
+            "config_path": str(self.config_file),
+            "theme": "dark",
+            "window_size": [900, 650],
+            "silent_install": True, # Global silent install for winetricks components
+            "force_winetricks_install": False # New setting for --force
+        }
         
-        if "Wine-System" not in configs:
-            configs["Wine-System"] = {
+        default_repositories = {
+            "proton": [
+                {"name": "GloriousEggroll Proton", "url": "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases", "enabled": True}
+            ],
+            "wine": [
+                {"name": "Kron4ek Wine Builds", "url": "https://api.github.com/repos/Kron4ek/Wine-Builds/releases", "enabled": True}
+            ]
+        }
+
+        # Usar setdefault para evitar sobrescribir si ya existen
+        self.configs.setdefault("configs", {})
+        self.configs.setdefault("last_used", "Wine-System")
+        self.configs.setdefault("settings", default_settings)
+        self.configs.setdefault("repositories", default_repositories)
+        self.configs.setdefault("custom_programs", []) # Asegurar que custom_programs exista
+
+        # Merge default settings, but keep existing values if they are present
+        for key, value in default_settings.items():
+            self.configs["settings"].setdefault(key, value)
+
+        if "Wine-System" not in self.configs["configs"]:
+            self.configs["configs"]["Wine-System"] = {
                 "type": "wine",
                 "prefix": str(Path.home() / ".wine"),
                 "arch": "win64"
             }
-        
-        settings = self.configs.setdefault("settings", {
-            "winetricks_path": str(Path(__file__).parent / "AppDir" / "usr" / "bin" / "winetricks"),
-            "config_path": str(self.config_file),
-            "theme": "dark",  # Cambiado a dark por defecto para estilo Steam Deck
-            "window_size": [900, 650],
-            "silent_install": True  # Modo silencioso activado por defecto
-        })
-        
-        # Configuración de repositorios por defecto
-        if "repositories" not in self.configs:
-            self.configs["repositories"] = {
-                "proton": [
-                    {
-                        "name": "GloriousEggroll Proton",
-                        "url": "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases",
-                        "enabled": True
-                    }
-                ],
-                "wine": [
-                    {
-                        "name": "Kron4ek Wine Builds",
-                        "url": "https://api.github.com/repos/Kron4ek/Wine-Builds/releases",
-                        "enabled": True
-                    }
-                ]
-            }
-        
+            
         self.save_configs()
 
-    def load_configs(self):
-        """Carga configuraciones optimizada"""
-        default = {
-            "configs": {},
-            "last_used": "Wine-System",
-            "custom_programs": [],
-            "settings": {
-                "winetricks_path": str(Path(__file__).parent / "AppDir" / "usr" / "bin" / "winetricks"),
-                "config_path": str(self.config_file),
-                "theme": "dark",  # Cambiado a dark por defecto
-                "window_size": [900, 650],
-                "silent_install": True
-            },
-            "repositories": {
-                "proton": [
-                    {
-                        "name": "GloriousEggroll Proton",
-                        "url": "https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases",
-                        "enabled": True
-                    }
-                ],
-                "wine": [
-                    {
-                        "name": "Kron4ek Wine Builds",
-                        "url": "https://api.github.com/repos/Kron4ek/Wine-Builds/releases",
-                        "enabled": True
-                    }
-                ]
-            }
-        }
-        
+    def _load_configs(self):
+        """Carga las configuraciones desde el archivo JSON. Devuelve un diccionario vacio si falla o no existe."""
         if not self.config_file.exists():
-            return default
-        
+            return {}
+            
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
-                loaded = json.load(f)
-                loaded.setdefault("custom_programs", default["custom_programs"])
-                loaded.setdefault("settings", default["settings"])
-                loaded.setdefault("repositories", default["repositories"])
-                return loaded
-        except Exception as e:
-            print(f"Error loading config: {e}")
-            return default
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Error cargando el archivo de configuracion {self.config_file}: {e}. Se usara la configuracion por defecto.")
+            return {}
 
     def save_configs(self):
-        """Guarda configuraciones con manejo de errores"""
+        """Guarda las configuraciones en el archivo JSON con manejo de errores."""
         try:
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.configs, f, indent=4, ensure_ascii=False)
-        except Exception as e:
-            print(f"Error saving config: {e}")
+        except IOError as e:
+            print(f"Error guardando el archivo de configuracion {self.config_file}: {e}")
 
-    def get_config(self, config_name):
-        """Obtiene una configuración específica por nombre"""
-        return self.configs["configs"].get(config_name)
+    def get_config(self, config_name: str) -> dict | None:
+        """Obtiene una configuracion especifica por nombre."""
+        return self.configs.get("configs", {}).get(config_name)
 
-    def get_current_env(self, config_name):
-        """Obtiene el entorno para la configuración actual"""
+    def get_current_environment(self, config_name: str) -> dict:
+        """
+        Obtiene las variables de entorno para la configuracion dada.
+        Valida la existencia de los ejecutables clave de Wine/Proton.
+        """
         config = self.get_config(config_name)
         if not config:
-            return None
+            raise ValueError(f"Configuracion '{config_name}' no encontrada.")
 
         env = os.environ.copy()
         env["WINEPREFIX"] = config["prefix"]
         env["WINEARCH"] = config.get("arch", "win64")
 
+        wine_executable = "wine"
+        wineserver_executable = "wineserver"
+        path_override = ""
+
         if config.get("type") == "proton":
             proton_dir = Path(config["proton_dir"])
-            env.update({
-                "PROTON_DIR": str(proton_dir),
-                "WINE": str(proton_dir / "files/bin/wine"),
-                "WINESERVER": str(proton_dir / "files/bin/wineserver"),
-                "PATH": f"{proton_dir / 'files/bin'}:{os.environ.get('PATH', '')}"
-            })
+            wine_executable = str(proton_dir / "files/bin/wine")
+            wineserver_executable = str(proton_dir / "files/bin/wineserver")
+            path_override = str(proton_dir / "files/bin")
+            
+            if not Path(wine_executable).is_file():
+                raise FileNotFoundError(f"Ejecutable de Wine no encontrado en el directorio de Proton: {wine_executable}")
+
+            env["PROTON_DIR"] = str(proton_dir)
             version_file = proton_dir / "version"
             if version_file.exists():
                 with open(version_file, 'r', encoding='utf-8') as f:
                     env["PROTON_VERSION"] = f.read().strip()
-
+            
             try:
-                result = subprocess.run(
-                    [str(proton_dir / "files/bin/wine"), "--version"],
-                    env=env,
-                    capture_output=True, text=True
-                )
-                if result.returncode == 0:
-                    env["WINE_VERSION_IN_PROTON"] = result.stdout.strip()
-            except Exception:
-                pass
-        else:
+                result = subprocess.run([wine_executable, "--version"], env=env, capture_output=True, text=True, check=True, timeout=5)
+                env["WINE_VERSION_IN_PROTON"] = result.stdout.strip()
+            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                env["WINE_VERSION_IN_PROTON"] = "N/A (Error obteniendo version o tiempo de espera agotado)"
+
+        else: # type == "wine"
             wine_dir = config.get("wine_dir")
             if wine_dir:
                 wine_dir = Path(wine_dir)
-                env.update({
-                    "WINE": str(wine_dir / "bin/wine"),
-                    "WINESERVER": str(wine_dir / "bin/wineserver"),
-                    "PATH": f"{wine_dir / 'bin'}:{os.environ.get('PATH', '')}"
-                })
+                wine_executable = str(wine_dir / "bin/wine")
+                wineserver_executable = str(wine_dir / "bin/wineserver")
+                path_override = str(wine_dir / "bin")
+
+                if not Path(wine_executable).is_file():
+                    raise FileNotFoundError(f"Ejecutable de Wine no encontrado en {wine_dir}: {wine_executable}")
+
                 try:
-                    result = subprocess.run(
-                        [str(wine_dir / "bin/wine"), "--version"],
-                        capture_output=True, text=True
-                    )
-                    if result.returncode == 0:
-                        env["WINE_VERSION"] = result.stdout.strip()
-                except Exception:
-                    pass
-            else:
-                env.update({
-                    "WINE": "wine",
-                    "WINESERVER": "wineserver"
-                })
+                    result = subprocess.run([wine_executable, "--version"], capture_output=True, text=True, check=True, timeout=5)
+                    env["WINE_VERSION"] = result.stdout.strip()
+                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                    env["WINE_VERSION"] = "N/A (Error obteniendo version o tiempo de espera agotado)"
+            else: # Usar Wine del sistema
                 try:
-                    result = subprocess.run(
-                        ["wine", "--version"],
-                        capture_output=True, text=True
-                    )
-                    if result.returncode == 0:
-                        env["WINE_VERSION"] = result.stdout.strip()
-                except Exception:
-                    pass
+                    # Comprobar si el comando 'wine' existe en PATH
+                    subprocess.run(["which", "wine"], capture_output=True, text=True, check=True, timeout=5)
+                    # Obtener version de wine
+                    result = subprocess.run(["wine", "--version"], capture_output=True, text=True, check=True, timeout=5)
+                    env["WINE_VERSION"] = result.stdout.strip()
+                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                    env["WINE_VERSION"] = "N/A (Wine no encontrado en el sistema o version no detectable)"
+        
+        # Actualizar PATH solo si hay una ruta especifica
+        if path_override:
+            env["PATH"] = f"{path_override}:{os.environ.get('PATH', '')}"
+            
+        env["WINE"] = wine_executable
+        env["WINESERVER"] = wineserver_executable
 
         return env
 
-    def remove_custom_program(self, program_name):
-        """Elimina un programa personalizado por nombre"""
-        if "custom_programs" not in self.configs:
-            return False
-
-        removed = False
-        for i in range(len(self.configs["custom_programs"])-1, -1, -1):
-            if self.configs["custom_programs"][i]["name"] == program_name:
-                del self.configs["custom_programs"][i]
-                removed = True
-
-        if removed:
+    def delete_custom_program(self, program_name: str) -> bool:
+        """Elimina un programa personalizado por nombre."""
+        initial_count = len(self.configs.get("custom_programs", []))
+        self.configs["custom_programs"] = [
+            p for p in self.configs.get("custom_programs", []) if p.get("name") != program_name
+        ]
+        if len(self.configs["custom_programs"]) < initial_count:
             self.save_configs()
+            return True
+        return False
 
-        return removed
-
-    def get_custom_programs(self):
-        """Obtiene la lista de programas personalizados con tipo por defecto si falta"""
+    def get_custom_programs(self) -> list[dict]:
+        """Obtiene la lista de programas personalizados, asegurando el campo 'type'."""
         programs = self.configs.get("custom_programs", [])
-
+        # Asegurar que todos los programas tengan un tipo, para compatibilidad
         for program in programs:
-            if "type" not in program:
-                program["type"] = "winetricks"
-
+            program.setdefault("type", "winetricks") # 'winetricks' como tipo por defecto
         return programs
         
-    def set_theme(self, theme):
-        """Establece el tema (light/dark)"""
-        if "settings" not in self.configs:
-            self.configs["settings"] = {}
-        self.configs["settings"]["theme"] = theme
+    def add_custom_program(self, program_info: dict):
+        """Anade un programa personalizado a la configuracion."""
+        # Se asume que las validaciones de duplicados se hacen en la GUI antes de llamar a esto.
+        # Aqui solo se anade al diccionario y se guarda.
+        self.configs.setdefault("custom_programs", []).append(program_info)
         self.save_configs()
 
-    def get_theme(self):
-        """Obtiene el tema actual"""
-        return self.configs["settings"].get("theme", "dark")  # Cambiado a dark por defecto
+    def set_theme(self, theme: str):
+        """Establece el tema (claro/oscuro) y guarda la configuracion."""
+        self.configs.setdefault("settings", {})["theme"] = theme
+        self.save_configs()
+
+    def get_theme(self) -> str:
+        """Obtiene el tema actual. Por defecto es 'dark'."""
+        return self.configs.get("settings", {}).get("theme", "dark")
         
-    def get_winetricks_path(self):
-        """Obtiene la ruta de winetricks (sistema -> configurada -> interna)"""
-        # Primero intentamos con el winetricks del sistema
-        try:
-            result = subprocess.run(["which", "winetricks"], 
-                                  capture_output=True, 
-                                  text=True,
-                                  check=True)
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-        except Exception:
-            pass
-        
-        # Luego probamos con la ruta configurada
-        configured_path = self.configs["settings"].get("winetricks_path", "")
-        if configured_path:
-            path_obj = Path(configured_path)
-            if path_obj.exists() and path_obj.is_file():
-                return configured_path
-        
-        # Finalmente probamos con la ruta interna
+    def get_winetricks_path(self) -> str:
+        """
+        Obtiene la ruta de winetricks en el siguiente orden de prioridad:
+        1. Ruta configurada por el usuario.
+        2. Ruta interna (AppDir).
+        3. 'winetricks' (comando disponible en PATH).
+        """
+        configured_path = self.configs.get("settings", {}).get("winetricks_path", "")
+        if configured_path and Path(configured_path).is_file():
+            return configured_path
+            
         internal_path = Path(__file__).parent / "AppDir" / "usr" / "bin" / "winetricks"
-        if internal_path.exists():
+        if internal_path.exists() and internal_path.is_file():
             return str(internal_path)
-        
-        # Si todo falla, devolvemos solo el comando
-        return "winetricks"
+            
+        return "winetricks" # Fallback al comando del sistema
 
-    def set_winetricks_path(self, path):
-        """Establece y valida la ruta de winetricks"""
-        if not path:
-            return
-        
+    def set_winetricks_path(self, path: str) -> bool:
+        """Establece y valida la ruta de winetricks."""
         path = path.strip()
-        
-        if path == "winetricks":
-            valid = True
-        else:
-            path_obj = Path(path)
-            valid = path_obj.exists() and path_obj.is_file()
-        
-        if not valid:
-            QMessageBox.warning(
-                None, 
-                "Ruta inválida",
-                "La ruta de winetricks no es válida o no existe.\n"
-                "Se usará la ruta por defecto."
-            )
-            return
-        
-        self.configs["settings"]["winetricks_path"] = path
-        self.save_configs()
-    
-    def set_config_path(self, path):
-        """Establece la ruta del archivo de configuración"""
-        self.configs["settings"]["config_path"] = path
-        self.save_configs()
-    
-    def get_config_path(self):
-        """Obtiene la ruta del archivo de configuración"""
-        return self.configs["settings"].get("config_path", str(Path.home() / ".config/wineprotonmanager_config.json"))
-    
-    def set_silent_install(self, enabled):
-        """Establece si la instalación silenciosa está activada"""
-        if "settings" not in self.configs:
-            self.configs["settings"] = {}
-        self.configs["settings"]["silent_install"] = enabled
-        self.save_configs()
-    
-    def get_silent_install(self):
-        """Obtiene si la instalación silenciosa está activada"""
-        return self.configs["settings"].get("silent_install", True)
+        if not path:
+            return False
 
-    def remove_config(self, config_name):
-        """Elimina una configuración guardada"""
-        if config_name in self.configs["configs"]:
+        if path == "winetricks" or Path(path).is_file():
+            self.configs.setdefault("settings", {})["winetricks_path"] = path
+            self.save_configs()
+            return True
+        else:
+            QMessageBox.warning(None, "Ruta Invalida", "La ruta de Winetricks no es valida o no existe.")
+            return False
+
+    def set_silent_install(self, enabled: bool):
+        """Establece si la instalacion silenciosa esta habilitada y guarda la configuracion."""
+        self.configs.setdefault("settings", {})["silent_install"] = enabled
+        self.save_configs()
+        
+    def get_silent_install(self) -> bool:
+        """Obtiene si la instalacion silenciosa esta habilitada. Por defecto es True."""
+        return self.configs.get("settings", {}).get("silent_install", True)
+    
+    def set_force_winetricks_install(self, enabled: bool):
+        """Establece si la instalacion forzada de Winetricks esta habilitada y guarda la configuracion."""
+        self.configs.setdefault("settings", {})["force_winetricks_install"] = enabled
+        self.save_configs()
+
+    def get_force_winetricks_install(self) -> bool:
+        """Obtiene si la instalacion forzada de Winetricks esta habilitada. Por defecto es False."""
+        return self.configs.get("settings", {}).get("force_winetricks_install", False)
+
+    def delete_config(self, config_name: str) -> bool:
+        """Elimina una configuracion guardada, ajustando 'last_used' si es necesario."""
+        if config_name in self.configs.get("configs", {}):
             del self.configs["configs"][config_name]
             if self.configs["last_used"] == config_name:
                 self.configs["last_used"] = "Wine-System" if "Wine-System" in self.configs["configs"] else ""
@@ -321,82 +265,106 @@ class ConfigManager:
             return True
         return False
 
-    def get_installed_winetricks(self, prefix_path):
-        """Obtiene la lista de componentes winetricks instalados en un prefix"""
+    def get_installed_winetricks(self, prefix_path: str) -> list[str]:
+        """Obtiene la lista de componentes de winetricks instalados en un prefijo."""
+        # Se asume que el registro de wineprotonmanager anota las instalaciones
+        # en el formato "installed <component_name>" o "installed <exe_filename>".
         wineprotonmanager_log = Path(prefix_path) / "wineprotonmanager.log"
-        if not wineprotonmanager_log.exists():
-            return []
-        
-        try:
-            with open(wineprotonmanager_log, 'r', encoding='utf-8') as f:
-                installed = []
-                for line in f.readlines():
-                    if line.strip() and "installed" in line.lower():
-                        # Extraer solo el nombre del componente
-                        parts = line.strip().split()
-                        if len(parts) > 1:
-                            # Tomar el último elemento (nombre del componente)
-                            installed.append(parts[-1])
-                return installed
-        except Exception:
-            return []
+        installed = set()
+        if wineprotonmanager_log.exists():
+            try:
+                with open(wineprotonmanager_log, 'r', encoding='utf-8', errors='ignore') as f:
+                    for line in f:
+                        match = re.search(r"installed\s+(\S+)", line)
+                        if match:
+                            installed.add(match.group(1))
+            except Exception as e:
+                print(f"Error leyendo el registro de winetricks: {e}")
+        return list(installed)
 
-    def save_window_size(self, size):
-        """Guarda el tamaño de la ventana"""
-        if "settings" not in self.configs:
-            self.configs["settings"] = {}
-        self.configs["settings"]["window_size"] = [size.width(), size.height()]
+    def save_window_size(self, size: QSize):
+        """Guarda el tamano de la ventana."""
+        self.configs.setdefault("settings", {})["window_size"] = [size.width(), size.height()]
         self.save_configs()
-    
-    def get_window_size(self):
-        """Obtiene el tamaño guardado de la ventana"""
-        size = self.configs["settings"].get("window_size", [900, 650])
+        
+    def get_window_size(self) -> QSize:
+        """Obtiene el tamano de ventana guardado. Por defecto es 900x650."""
+        size = self.configs.get("settings", {}).get("window_size", [900, 650])
         return QSize(size[0], size[1])
-    
-    def get_log_path(self, program_name):
-        """Obtiene la ruta del archivo de log para un programa"""
-        config_dir = Path.home() / ".config" / "WineProtonManager" / "logs"
+        
+    def get_log_path(self, program_name: str) -> Path:
+        """Obtiene la ruta al archivo de registro para un programa especifico."""
+        current_config_name = self.configs.get("last_used", "default")
+        log_sub_dir = self.log_dir / current_config_name
+        log_sub_dir.mkdir(parents=True, exist_ok=True)
         safe_name = re.sub(r'[^\w\-_.]', '_', program_name)
-        return config_dir / f"{safe_name}.log"
-    
-    def write_to_log(self, program_name, message):
-        """Escribe un mensaje en el log del programa"""
+        return log_sub_dir / f"{safe_name}.log"
+        
+    def write_to_log(self, program_name: str, message: str):
+        """Escribe un mensaje con marca de tiempo en el registro del programa."""
         log_path = self.get_log_path(program_name)
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(f"[{timestamp}] {message}\n")
+        except IOError as e:
+            print(f"Error escribiendo en el log {log_path}: {e}")
+            
+    def get_repositories(self, type_: str) -> list[dict]:
+        """Obtiene repositorios para Wine o Proton."""
+        return self.configs.get("repositories", {}).get(type_, [])
         
-        with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(f"[{timestamp}] {message}\n")
-    
-    def get_repositories(self, type_):
-        """Obtiene los repositorios para Wine o Proton"""
-        return self.configs["repositories"].get(type_, [])
-    
-    def add_repository(self, type_, name, url):
-        """Añade un nuevo repositorio"""
-        if "repositories" not in self.configs:
-            self.configs["repositories"] = {"wine": [], "proton": []}
+    def add_repository(self, type_: str, name: str, url: str) -> bool:
+        """Anade un nuevo repositorio, evitando duplicados."""
+        repos = self.configs.setdefault("repositories", {}).setdefault(type_, [])
+        if not any(r["url"] == url for r in repos):
+            repos.append({"name": name, "url": url, "enabled": True})
+            self.save_configs()
+            return True
+        return False
         
-        self.configs["repositories"][type_].append({
-            "name": name,
-            "url": url,
-            "enabled": True
-        })
-        self.save_configs()
-    
-    def remove_repository(self, type_, index):
-        """Elimina un repositorio"""
+    def delete_repository(self, type_: str, index: int) -> bool:
+        """Elimina un repositorio por indice."""
         if "repositories" in self.configs and type_ in self.configs["repositories"]:
             if 0 <= index < len(self.configs["repositories"][type_]):
                 del self.configs["repositories"][type_][index]
                 self.save_configs()
                 return True
         return False
-    
-    def toggle_repository(self, type_, index, enabled):
-        """Activa/desactiva un repositorio"""
+        
+    def toggle_repository(self, type_: str, index: int, enabled: bool) -> bool:
+        """Habilita/deshabilita un repositorio por indice."""
         if "repositories" in self.configs and type_ in self.configs["repositories"]:
             if 0 <= index < len(self.configs["repositories"][type_]):
                 self.configs["repositories"][type_][index]["enabled"] = enabled
                 self.save_configs()
                 return True
         return False
+
+    def apply_theme_to_dialog(self, dialog: QDialog | QFileDialog | QWidget):
+        """Aplica el tema actual (claro/oscuro) a un dialogo o widget de Qt."""
+        theme = self.get_theme()
+        palette = QPalette()
+        if theme == "dark":
+            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["dark_palette"]["window"])
+            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["dark_palette"]["window_text"])
+            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["dark_palette"]["base"])
+            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["dark_palette"]["text"])
+            palette.setColor(QPalette.Button, STYLE_STEAM_DECK["dark_palette"]["button"])
+            palette.setColor(QPalette.ButtonText, STYLE_STEAM_DECK["dark_palette"]["button_text"])
+            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["dark_palette"]["highlight"])
+            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["dark_palette"]["highlight_text"])
+        else:
+            palette = QApplication.style().standardPalette()
+        dialog.setPalette(palette)
+        # Asegurar que los botones en QFileDialog y otros dialogos tambien usen el estilo
+        for btn in dialog.findChildren(QPushButton):
+            btn.setStyleSheet(STYLE_STEAM_DECK["dark_button_style"] if theme == "dark" else STYLE_STEAM_DECK["button_style"])
+        
+        # Apply font to all children widgets in the dialog
+        for widget in dialog.findChildren(QWidget):
+            widget.setFont(STYLE_STEAM_DECK["font"])
+
+        # Special handling for QTableWidget to apply the correct theme style
+        for table_widget in dialog.findChildren(QTableWidget):
+            table_widget.setStyleSheet(STYLE_STEAM_DECK["dark_table_style"] if theme == "dark" else STYLE_STEAM_DECK["table_style"])
