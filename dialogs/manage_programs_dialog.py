@@ -1,71 +1,65 @@
-from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QListWidget, QLabel, QCheckBox, QDialog, QDialogButtonBox,
-    QMessageBox, QGroupBox, QComboBox, QLineEdit, QFileDialog,
-    QTabWidget, QFormLayout, QScrollArea, QListWidgetItem, QAction,
-    QMenu, QMenuBar, QTableWidget, QTableWidgetItem, QHeaderView, 
-    QTreeWidget, QTreeWidgetItem, QProgressDialog, QProgressBar
-)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QSize, QUrl
-from PyQt5.QtGui import QIcon, QPalette, QColor, QFont, QDesktopServices
-from styles import STEAM_DECK_STYLE
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QPushButton, QHBoxLayout, QMessageBox, QLabel, QGroupBox, QApplication, QWidget
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPalette, QColor
+from pathlib import Path
+
+from styles import STYLE_STEAM_DECK # Import the style constants
+from config_manager import ConfigManager # Corrected import path
 
 class ManageProgramsDialog(QDialog):
-    def __init__(self, config_manager, parent=None):
+    def __init__(self, config_manager: ConfigManager, parent: QWidget | None = None):
         super().__init__(parent)
         self.config_manager = config_manager
-        self.setWindowTitle("Programas Guardados")
-        self.setMinimumSize(600, 400)
+        self.setWindowTitle("Gestionar Programas Guardados")
+        self.setMinimumSize(650, 450)
         self.setup_ui()
         self.apply_steamdeck_style()
-        self.selected_programs = []
+        self.selected_programs_to_load = [] # Almacenar programas seleccionados para cargar
 
     def apply_steamdeck_style(self):
-        self.setFont(STEAM_DECK_STYLE["font"])
-        for widget in self.findChildren(QWidget):
-            if isinstance(widget, (QPushButton, QLabel, QComboBox, QLineEdit)):
-                widget.setFont(STEAM_DECK_STYLE["font"])
-            if isinstance(widget, QGroupBox):
-                widget.setFont(STEAM_DECK_STYLE["title_font"])
-            if isinstance(widget, QPushButton):
-                widget.setStyleSheet(STEAM_DECK_STYLE["button_style"])
-        
-        # Aplicar estilo de tabla según el tema actual
+        self.setFont(STYLE_STEAM_DECK["font"])
         theme = self.config_manager.get_theme()
-        if theme == "dark":
-            self.table.setStyleSheet(STEAM_DECK_STYLE["dark_table_style"])
-        else:
-            self.table.setStyleSheet(STEAM_DECK_STYLE["table_style"])
+        
+        for widget in self.findChildren(QWidget):
+            if isinstance(widget, QPushButton):
+                widget.setStyleSheet(STYLE_STEAM_DECK["dark_button_style"] if theme == "dark" else STYLE_STEAM_DECK["button_style"])
+            elif isinstance(widget, QGroupBox):
+                widget.setFont(STYLE_STEAM_DECK["title_font"])
+                widget.setStyleSheet(STYLE_STEAM_DECK["dark_groupbox_style"] if theme == "dark" else STYLE_STEAM_DECK["groupbox_style"])
+            elif isinstance(widget, QLabel):
+                widget.setFont(STYLE_STEAM_DECK["font"])
+        
+        self.table.setStyleSheet(STYLE_STEAM_DECK["dark_table_style"] if theme == "dark" else STYLE_STEAM_DECK["table_style"])
 
     def setup_ui(self):
         layout = QVBoxLayout()
         
         self.table = QTableWidget()
-        self.table.setColumnCount(3)  # Solo 3 columnas ahora
-        self.table.setHorizontalHeaderLabels(["Nombre", "Comando", "Tipo"])
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(["Nombre", "Comando/Ruta", "Tipo"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.MultiSelection)  # Cambiado a selección múltiple
+        self.table.setSelectionMode(QTableWidget.MultiSelection)
         self.load_programs()
         layout.addWidget(self.table)
 
         btn_layout = QHBoxLayout()
-        self.load_selected_btn = QPushButton("Cargar Selección")
-        self.load_selected_btn.setAutoDefault(False)
-        self.load_selected_btn.clicked.connect(self.load_selected)
-        btn_layout.addWidget(self.load_selected_btn)
+        self.btn_load_selected = QPushButton("Cargar Seleccion")
+        self.btn_load_selected.setAutoDefault(False)
+        self.btn_load_selected.clicked.connect(self.load_selection)
+        btn_layout.addWidget(self.btn_load_selected)
 
-        self.delete_btn = QPushButton("Eliminar Selección")
-        self.delete_btn.setAutoDefault(False)
-        self.delete_btn.clicked.connect(self.delete_programs)
-        btn_layout.addWidget(self.delete_btn)
+        self.btn_delete = QPushButton("Eliminar Seleccion")
+        self.btn_delete.setAutoDefault(False)
+        self.btn_delete.clicked.connect(self.delete_programs)
+        btn_layout.addWidget(self.btn_delete)
 
-        self.close_btn = QPushButton("Cerrar")
-        self.close_btn.setAutoDefault(False)
-        self.close_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(self.close_btn)
+        self.btn_close = QPushButton("Cerrar")
+        self.btn_close.setAutoDefault(False)
+        self.btn_close.clicked.connect(self.reject) # Usar reject para cerrar sin cargar
+        btn_layout.addWidget(self.btn_close)
 
         layout.addLayout(btn_layout)
         self.setLayout(layout)
@@ -76,53 +70,91 @@ class ManageProgramsDialog(QDialog):
         self.table.setRowCount(len(programs))
         
         for row, program in enumerate(programs):
-            name_item = QTableWidgetItem(program['name'])
+            name_item = QTableWidgetItem(program.get('name', 'N/A'))
             name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
             self.table.setItem(row, 0, name_item)
             
-            path_item = QTableWidgetItem(program['path'])
+            path_item = QTableWidgetItem(program.get('path', 'N/A'))
             path_item.setFlags(path_item.flags() & ~Qt.ItemIsEditable)
             self.table.setItem(row, 1, path_item)
             
-            type_item = QTableWidgetItem("EXE" if program.get("type") == "exe" else "Winetricks")
+            type_text = program.get("type", "winetricks").upper()
+            type_item = QTableWidgetItem(type_text) # Mostrar EXE, WINETRICKS, WTR
             type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
             self.table.setItem(row, 2, type_item)
 
-    def load_selected(self):
-        selected_rows = set(index.row() for index in self.table.selectedIndexes())
+    def load_selection(self):
+        selected_rows = sorted(list(set(index.row() for index in self.table.selectedIndexes())))
         if not selected_rows:
-            QMessageBox.warning(self, "Advertencia", "No hay programas seleccionados")
+            QMessageBox.warning(self, "Advertencia", "No se seleccionaron programas para cargar.")
             return
 
-        programs = self.config_manager.get_custom_programs()
-        self.selected_programs = [programs[row] for row in selected_rows]
-        self.accept()
+        all_programs = self.config_manager.get_custom_programs()
+        
+        # Get current prefix details for checking installed programs
+        current_config_name = self.config_manager.configs.get("last_used")
+        config = self.config_manager.get_config(current_config_name)
+        if not config or "prefix" not in config:
+            QMessageBox.critical(self, "Error de Configuración", "No hay un prefijo de Wine/Proton activo para verificar instalaciones.")
+            return
+
+        prefix_path = config["prefix"]
+        installed_items_in_prefix = self.config_manager.get_installed_winetricks(prefix_path)
+
+        programs_to_add = []
+        for row in selected_rows:
+            program_info = all_programs[row]
+            item_already_installed = False
+
+            if program_info["type"] == "winetricks":
+                if program_info["path"] in installed_items_in_prefix:
+                    item_already_installed = True
+            elif program_info["type"] == "exe":
+                exe_filename = Path(program_info["path"]).name
+                if exe_filename in installed_items_in_prefix:
+                    item_already_installed = True
+            elif program_info["type"] == "wtr":
+                wtr_filename = Path(program_info["path"]).name
+                if wtr_filename in installed_items_in_prefix:
+                    item_already_installed = True
+            
+            if item_already_installed:
+                reply = QMessageBox.question(self, "Programa ya Instalado",
+                                             f"El programa '{program_info['name']}' ya está registrado como instalado en este prefijo ({current_config_name}). ¿Deseas agregarlo a la lista de instalación de todos modos?",
+                                             QMessageBox.Yes | QMessageBox.No)
+                if reply == QMessageBox.No:
+                    continue # Skip this program
+
+            programs_to_add.append(program_info)
+        
+        self.selected_programs_to_load = programs_to_add
+        self.accept() # Close the dialog and return ACCEPTED
 
     def delete_programs(self):
-        selected_rows = set(index.row() for index in self.table.selectedIndexes())
+        selected_rows = sorted(list(set(index.row() for index in self.table.selectedIndexes())), reverse=True)
         if not selected_rows:
+            QMessageBox.warning(self, "Advertencia", "No se seleccionaron programas para eliminar.")
             return
 
-        rows_to_delete = sorted(selected_rows, reverse=True)
-        programs = self.config_manager.get_custom_programs()
-        programs_to_delete = [programs[row]['name'] for row in rows_to_delete]
+        program_names_to_delete = [self.table.item(row, 0).text() for row in selected_rows]
 
         reply = QMessageBox.question(
-            self, "Confirmar",
-            f"¿Eliminar los {len(programs_to_delete)} programas seleccionados?",
-            QMessageBox.Yes | QMessageBox.No 
+            self, "Confirmar Eliminacion",
+            f"Estas seguro de que quieres eliminar {len(program_names_to_delete)} programa(s) guardado(s)?\n\n" + "\n".join(program_names_to_delete),
+            QMessageBox.Yes | QMessageBox.No
         )
 
         if reply == QMessageBox.Yes:
-            success = True
-            for program_name in programs_to_delete:
-                if not self.config_manager.remove_custom_program(program_name):
-                    success = False
-            if success:
-                self.load_programs()
-                QMessageBox.information(self, "Éxito", "Programas eliminados correctamente")
+            deleted_count = 0
+            for name in program_names_to_delete:
+                if self.config_manager.delete_custom_program(name):
+                    deleted_count += 1
+            
+            if deleted_count > 0:
+                self.load_programs() # Recargar la tabla despues de la eliminacion
+                QMessageBox.information(self, "Exito", f"{deleted_count} programa(s) eliminado(s) exitosamente.")
             else:
-                QMessageBox.warning(self, "Error", "Algunos programas no pudieron ser eliminados")
+                QMessageBox.warning(self, "Error", "No se pudo eliminar ningun programa.")
 
-    def get_selected_programs(self):
-        return self.selected_programs
+    def get_selected_programs_to_load(self) -> list[dict]:
+        return self.selected_programs_to_load
