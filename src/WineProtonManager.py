@@ -1178,8 +1178,8 @@ class ConfigDialog(QDialog):
                 widget.setFont(STYLE_STEAM_DECK["title_font"]) # Titulo de grupo en negrita
                 # Aplicar el estilo de grupo correcto (bordes, color de titulo)
                 widget.setStyleSheet(STYLE_STEAM_DECK["dark_groupbox_style"] if theme == "dark" else STYLE_STEAM_DECK["groupbox_style"])
-            elif isinstance(widget, QLabel):
-                widget.setFont(STYLE_STEAM_DECK["font"]) # Asegurar que las etiquetas tambien tengan la fuente
+            elif isinstance(widget, QLabel) or isinstance(widget, QCheckBox) or isinstance(widget, QRadioButton):
+                widget.setFont(STYLE_STEAM_DECK["font"]) # Asegurar que las etiquetas, checkboxes y radiobuttons tambien tengan la fuente
             elif isinstance(widget, QComboBox) or isinstance(widget, QLineEdit):
                 widget.setFont(STYLE_STEAM_DECK["font"]) # Asegurar que combos y lineedits tengan la fuente
 
@@ -1206,13 +1206,11 @@ class ConfigDialog(QDialog):
         list_font_size = base_font_size + 6
 
         if theme == "dark":
-            # REMOVE .name() here, as COLOR_DARK_WINDOW, COLOR_DARK_TEXT are already strings
             list_bg = COLOR_DARK_WINDOW
             list_text = COLOR_DARK_TEXT
             list_border = COLOR_DARK_BORDER
             list_highlight = COLOR_PRIMARY
         else:
-            # REMOVE .name() here, as COLOR_LIGHT_BASE, COLOR_LIGHT_TEXT are already strings
             list_bg = COLOR_LIGHT_BASE
             list_text = COLOR_LIGHT_TEXT
             list_border = COLOR_LIGHT_BORDER
@@ -1227,7 +1225,29 @@ class ConfigDialog(QDialog):
         self.list_versions_proton.setStyleSheet(unified_list_style)
         self.list_versions_wine.setStyleSheet(unified_list_style)
 
+        # QListWidget for configs in "Configuraciones Guardadas" tab uses table style logic
+        # This specific QListWidget is meant to look like a table, so apply table style.
         self.list_config.setStyleSheet(STYLE_STEAM_DECK["dark_table_style"] if theme == "dark" else STYLE_STEAM_DECK["table_style"])
+
+        # Apply palette for general dialog background and text
+        palette = QPalette()
+        if theme == "dark":
+            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["dark_palette"]["window"])
+            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["dark_palette"]["window_text"])
+            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["dark_palette"]["base"])
+            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["dark_palette"]["text"])
+            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["dark_palette"]["highlight"])
+            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["dark_palette"]["highlight_text"])
+        else:
+            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["light_palette"]["window"])
+            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["light_palette"]["window_text"])
+            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["light_palette"]["base"])
+            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["light_palette"]["text"])
+            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["light_palette"]["highlight"])
+            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["light_palette"]["highlight_text"])
+        self.setPalette(palette)
+        # Force repaint to ensure styles are applied immediately
+        self.repaint()
 
 
     def setup_ui(self):
@@ -1451,10 +1471,12 @@ class ConfigDialog(QDialog):
             if not wine_executable or not Path(wine_executable).is_file():
                 raise FileNotFoundError(f"Ejecutable de Wine no encontrado en el entorno: {wine_executable}")
 
-            progress_dialog = QProgressDialog("Inicializando Prefijo de Wine/Proton...", "Cancelar", 0, 0, self)
+            progress_dialog = QProgressDialog("Inicializando Prefijo de Wine/Proton...", "", 0, 0, self) # Empty label initially
             progress_dialog.setWindowTitle("Inicializacion del Prefijo")
             progress_dialog.setWindowModality(Qt.WindowModal)
             progress_dialog.setCancelButton(None) # Do not allow canceling initialization
+            progress_dialog.setFixedSize(450, 150) # Set fixed size for progress dialog
+            self.config_manager.apply_theme_to_dialog(progress_dialog) # Apply theme to progress dialog
             progress_dialog.show()
 
             try:
@@ -1603,7 +1625,7 @@ class ConfigDialog(QDialog):
 
         repo_btn_layout = QHBoxLayout()
 
-        self.btn_add_proton_repo = QPushButton("Anadir")
+        self.btn_add_proton_repo = QPushButton("Añadir")
         self.btn_add_proton_repo.setAutoDefault(False)
         self.btn_add_proton_repo.clicked.connect(self.add_proton_repository)
         repo_btn_layout.addWidget(self.btn_add_proton_repo)
@@ -1658,7 +1680,7 @@ class ConfigDialog(QDialog):
 
         repo_btn_layout = QHBoxLayout()
 
-        self.btn_add_wine_repo = QPushButton("Anadir")
+        self.btn_add_wine_repo = QPushButton("Añadir")
         self.btn_add_wine_repo.setAutoDefault(False)
         self.btn_add_wine_repo.clicked.connect(self.add_wine_repository)
         repo_btn_layout.addWidget(self.btn_add_wine_repo)
@@ -1731,7 +1753,7 @@ class ConfigDialog(QDialog):
                         self.load_proton_repositories()
                     else:
                         self.load_wine_repositories()
-                    QMessageBox.information(self, "Repositorio Anadido", f"Repositorio '{name}' anadido exitosamente.")
+                    QMessageBox.information(self, "Repositorio Añadido", f"Repositorio '{name}' añadido exitosamente.")
                 else:
                     QMessageBox.warning(self, "Duplicado", f"El repositorio '{name}' ya existe.")
             except ValueError as e:
@@ -1794,7 +1816,7 @@ class ConfigDialog(QDialog):
         enabled_repos = [repo for repo in self.config_manager.get_repositories(repo_type) if repo.get("enabled", True)]
 
         if not enabled_repos:
-            QMessageBox.information(self, "No hay Repositorios", f"No hay repositorios de {repo_type.capitalize()} activos. Por favor, anade o habilita uno.")
+            QMessageBox.information(self, "No hay Repositorios", f"No hay repositorios de {repo_type.capitalize()} activos. Por favor, añade o habilita uno.")
             return
 
         self.progress_dialog = QProgressDialog(f"Buscando versiones de {repo_type.capitalize()}...", "Cancelar", 0, len(enabled_repos), self)
@@ -1802,6 +1824,7 @@ class ConfigDialog(QDialog):
         self.progress_dialog.setWindowModality(Qt.WindowModal)
         self.progress_dialog.setAutoClose(True)
         self.progress_dialog.setCancelButton(None) # No permitir cancelar la busqueda
+        self.config_manager.apply_theme_to_dialog(self.progress_dialog) # Apply theme to progress dialog
 
         self.version_search_thread = VersionSearchThread(repo_type, enabled_repos)
         self.version_search_thread.progress.connect(self.progress_dialog.setValue)
@@ -1820,7 +1843,7 @@ class ConfigDialog(QDialog):
         self.update_versions("wine")
 
     def _add_release_to_list(self, repo_type: str, release_name: str, version: str, assets: list, published_at: str):
-        """Anade un lanzamiento a la lista correspondiente (Wine o Proton)."""
+        """Añade un lanzamiento a la lista correspondiente (Wine o Proton)."""
         list_widget = self.list_versions_proton if repo_type == "proton" else self.list_versions_wine
         item = QListWidgetItem(release_name)
         item.setData(Qt.UserRole, assets) # Guardar los assets para la descarga
@@ -1878,6 +1901,7 @@ class ConfigDialog(QDialog):
         self.progress_dialog.setWindowTitle("Descargando")
         self.progress_dialog.setWindowModality(Qt.WindowModal)
         self.progress_dialog.setAutoClose(False) # Mantener abierto hasta finalizar
+        self.config_manager.apply_theme_to_dialog(self.progress_dialog) # Apply theme to progress dialog
 
         self.download_progress_bar = QProgressBar(self.progress_dialog)
         self.download_progress_bar.setRange(0, 100)
@@ -1899,6 +1923,7 @@ class ConfigDialog(QDialog):
     def on_download_finished(self, filepath: str, name: str):
         self.progress_dialog.setLabelText(f"Descomprimiendo {name}...")
         self.progress_dialog.setMaximum(0) # Modo indeterminado para la descompresion
+        self.config_manager.apply_theme_to_dialog(self.progress_dialog) # Re-apply theme just in case
 
         self.decompression_thread = DecompressionThread(filepath, self.config_manager, name)
         self.decompression_thread.finished.connect(partial(self.on_decompression_finished, name=name))
@@ -2049,7 +2074,7 @@ class ConfigDialog(QDialog):
             self.config_manager.set_ask_for_backup_before_action(self.checkbox_ask_for_backup_before_action.isChecked()) # NEW: Save ask for backup setting
 
             if winetricks_path_ok:
-                QMessageBox.information(self, "Guardado", "Ajustes guardados exitosamente.\nLos cambios de tema se aplicaran despues de reiniciar la aplicacion.")
+                QMessageBox.information(self, "Guardado", "Ajustes guardados exitosamente.\nLos cambios de tema se aplicarán después de reiniciar la aplicación.")
             # Si winetricks_path_ok es False, el mensaje de error ya se ha mostrado por set_winetricks_path
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error guardando ajustes: {str(e)}")
@@ -2283,8 +2308,11 @@ class ConfigDialog(QDialog):
                 steam_compat_data_root = Path.home() / ".local/share/Steam/steamapps/compatdata"
                 temp_config["prefix"] = str(steam_compat_data_root / appid / "pfx")
                 temp_config["steam_appid"] = appid
-        elif self.wine_directory.text().strip():
+            elif self.wine_directory.text().strip(): # This is for Wine, but was under proton block before. Corrected.
+                temp_config["wine_dir"] = self.wine_directory.text().strip()
+        elif self.wine_directory.text().strip(): # For Wine config
             temp_config["wine_dir"] = self.wine_directory.text().strip()
+
 
         # Guardar temporalmente para que get_current_environment pueda acceder
         original_configs = self.config_manager.configs.copy()
@@ -2388,7 +2416,7 @@ class RepositoryDialog(QDialog):
     def __init__(self, repo_type: str, parent: QWidget | None = None):
         super().__init__(parent)
         self.repo_type = repo_type
-        self.setWindowTitle(f"Anadir Repositorio de {self.repo_type.capitalize()}")
+        self.setWindowTitle(f"Añadir Repositorio de {self.repo_type.capitalize()}")
         self.setup_ui()
         self.apply_steamdeck_style()
 
@@ -2401,8 +2429,28 @@ class RepositoryDialog(QDialog):
         for widget in self.findChildren(QWidget):
             if isinstance(widget, QPushButton):
                 widget.setStyleSheet(STYLE_STEAM_DECK["dark_button_style"] if theme_is_dark else STYLE_STEAM_DECK["button_style"])
-            elif isinstance(widget, QLabel):
+            elif isinstance(widget, QLabel) or isinstance(widget, QLineEdit): # Added QLineEdit
                 widget.setFont(STYLE_STEAM_DECK["font"])
+
+        # Apply palette for the general dialog background and text
+        palette = QPalette()
+        if theme_is_dark:
+            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["dark_palette"]["window"])
+            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["dark_palette"]["window_text"])
+            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["dark_palette"]["base"]) # For text input backgrounds
+            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["dark_palette"]["text"])
+            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["dark_palette"]["highlight"])
+            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["dark_palette"]["highlight_text"])
+        else:
+            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["light_palette"]["window"])
+            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["light_palette"]["window_text"])
+            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["light_palette"]["base"])
+            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["light_palette"]["text"])
+            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["light_palette"]["highlight"])
+            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["light_palette"]["highlight_text"])
+        self.setPalette(palette)
+        # Force repaint to ensure styles are applied immediately
+        self.repaint()
 
     def setup_ui(self):
         layout = QFormLayout()
@@ -2452,20 +2500,15 @@ class SelectGroupsDialog(QDialog):
         tree_font_size = base_font_size + 3
 
         if theme_is_dark:
-            # REMOVE .name() here
             tree_bg_color = COLOR_DARK_WINDOW
             tree_text_color = COLOR_DARK_TEXT
             tree_border_color = COLOR_DARK_BORDER
             tree_header_bg_color = COLOR_DARK_BUTTON
             tree_header_text_color = COLOR_DARK_TEXT
         else:
-            # REMOVE .name() here
             tree_bg_color = COLOR_LIGHT_BASE
             tree_text_color = COLOR_LIGHT_TEXT
             tree_border_color = COLOR_LIGHT_BORDER
-            # Here, STYLE_STEAM_DECK["light_palette"]["button"] is a QColor, so .name() IS appropriate if you wanted that specific color.
-            # However, if you want it to be a direct string like the others, stick to a COLOR_ constant.
-            # I'll change it to COLOR_LIGHT_WINDOW to match the simple string pattern.
             tree_header_bg_color = COLOR_LIGHT_WINDOW # Use a direct string constant
             tree_header_text_color = COLOR_LIGHT_TEXT
 
@@ -2499,7 +2542,7 @@ class SelectGroupsDialog(QDialog):
             elif isinstance(widget, QGroupBox):
                 widget.setFont(STYLE_STEAM_DECK["title_font"])
                 widget.setStyleSheet(STYLE_STEAM_DECK["dark_groupbox_style"] if theme_is_dark else STYLE_STEAM_DECK["groupbox_style"])
-            elif isinstance(widget, QLabel):
+            elif isinstance(widget, QLabel) or isinstance(widget, QCheckBox): # Added QCheckBox
                 widget.setFont(STYLE_STEAM_DECK["font"])
 
         # Aplicar paleta para el fondo y texto general del dialogo
@@ -2519,7 +2562,7 @@ class SelectGroupsDialog(QDialog):
             palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["light_palette"]["highlight"])
             palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["light_palette"]["highlight_text"])
         self.setPalette(palette)
-        # Forzar repintado para asegurar que los estilos se apliquen inmediatamente
+        # Force repaint to ensure styles are applied immediately
         self.repaint()
 
     def setup_ui(self):
@@ -2611,7 +2654,7 @@ class CustomProgramDialog(QDialog):
     def __init__(self, config_manager: ConfigManager, parent: QWidget | None = None):
         super().__init__(parent)
         self.config_manager = config_manager
-        self.setWindowTitle("Anadir Programa Personalizado")
+        self.setWindowTitle("Añadir Programa Personalizado")
         self.setup_ui()
         self.apply_steamdeck_style()
 
@@ -2625,8 +2668,28 @@ class CustomProgramDialog(QDialog):
             elif isinstance(widget, QGroupBox):
                 widget.setFont(STYLE_STEAM_DECK["title_font"])
                 widget.setStyleSheet(STYLE_STEAM_DECK["dark_groupbox_style"] if theme == "dark" else STYLE_STEAM_DECK["groupbox_style"])
-            elif isinstance(widget, QLabel):
+            elif isinstance(widget, QLabel) or isinstance(widget, QLineEdit): # Added QLineEdit
                 widget.setFont(STYLE_STEAM_DECK["font"])
+
+        # Apply palette for the general dialog background and text
+        palette = QPalette()
+        if theme == "dark":
+            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["dark_palette"]["window"])
+            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["dark_palette"]["window_text"])
+            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["dark_palette"]["base"]) # For text input backgrounds
+            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["dark_palette"]["text"])
+            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["dark_palette"]["highlight"])
+            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["dark_palette"]["highlight_text"])
+        else:
+            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["light_palette"]["window"])
+            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["light_palette"]["window_text"])
+            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["light_palette"]["base"])
+            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["light_palette"]["text"])
+            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["light_palette"]["highlight"])
+            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["light_palette"]["highlight_text"])
+        self.setPalette(palette)
+        # Force repaint to ensure styles are applied immediately
+        self.repaint()
 
     def setup_ui(self):
         layout = QFormLayout()
@@ -2728,6 +2791,26 @@ class ManageProgramsDialog(QDialog):
                 widget.setFont(STYLE_STEAM_DECK["font"])
 
         self.table.setStyleSheet(STYLE_STEAM_DECK["dark_table_style"] if theme == "dark" else STYLE_STEAM_DECK["table_style"])
+        
+        # Apply palette for the general dialog background and text
+        palette = QPalette()
+        if theme == "dark":
+            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["dark_palette"]["window"])
+            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["dark_palette"]["window_text"])
+            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["dark_palette"]["base"]) # For text input backgrounds
+            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["dark_palette"]["text"])
+            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["dark_palette"]["highlight"])
+            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["dark_palette"]["highlight_text"])
+        else:
+            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["light_palette"]["window"])
+            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["light_palette"]["window_text"])
+            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["light_palette"]["base"])
+            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["light_palette"]["text"])
+            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["light_palette"]["highlight"])
+            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["light_palette"]["highlight_text"])
+        self.setPalette(palette)
+        # Force repaint to ensure styles are applied immediately
+        self.repaint()
 
     def setup_ui(self):
         layout = QVBoxLayout()
@@ -2769,16 +2852,16 @@ class ManageProgramsDialog(QDialog):
 
         for row, program in enumerate(programs):
             name_item = QTableWidgetItem(program.get('name', 'N/A'))
-            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable) # Make cell read-only
             self.table.setItem(row, 0, name_item)
 
             path_item = QTableWidgetItem(program.get('path', 'N/A'))
-            path_item.setFlags(path_item.flags() & ~Qt.ItemIsEditable)
+            path_item.setFlags(path_item.flags() & ~Qt.ItemIsEditable) # Make cell read-only
             self.table.setItem(row, 1, path_item)
 
             type_text = program.get("type", "winetricks").upper()
             type_item = QTableWidgetItem(type_text) # Mostrar EXE, WINETRICKS, WTR
-            type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable)
+            type_item.setFlags(type_item.flags() & ~Qt.ItemIsEditable) # Make cell read-only
             self.table.setItem(row, 2, type_item)
 
     def load_selection(self):
@@ -2904,7 +2987,7 @@ class InstallerApp(QWidget):
             elif isinstance(widget, QGroupBox):
                 widget.setFont(STYLE_STEAM_DECK["title_font"])
                 widget.setStyleSheet(STYLE_STEAM_DECK["dark_groupbox_style"] if theme == "dark" else STYLE_STEAM_DECK["groupbox_style"])
-            elif isinstance(widget, QLabel):
+            elif isinstance(widget, QLabel) or isinstance(widget, QCheckBox): # Added QCheckBox
                 widget.setFont(STYLE_STEAM_DECK["font"])
 
         self.items_table.setStyleSheet(STYLE_STEAM_DECK["dark_table_style"] if theme == "dark" else STYLE_STEAM_DECK["table_style"])
@@ -2958,7 +3041,7 @@ class InstallerApp(QWidget):
 
         custom_group = QGroupBox("Programas Personalizados")
         custom_layout = QVBoxLayout()
-        self.btn_add_custom = QPushButton("Anadir Programa/Script")
+        self.btn_add_custom = QPushButton("Añadir Programa/Script")
         self.btn_add_custom.setAutoDefault(False)
         self.btn_add_custom.clicked.connect(self.add_custom_program)
         custom_layout.addWidget(self.btn_add_custom)
@@ -3279,7 +3362,7 @@ class InstallerApp(QWidget):
         """Abre el dialogo para seleccionar componentes de Winetricks."""
         component_groups = {
             "Librerias de Visual Basic": ["vb2run", "vb3run", "vb4run", "vb5run", "vb6run"],
-            "Tiempo de Ejecucion de Visual C++": [
+            "Librerias de Visual Basic C++": [
                 "vcrun6", "vcrun6sp6", "vcrun2003", "vcrun2005", "vcrun2008",
                 "vcrun2010", "vcrun2012", "vcrun2013", "vcrun2015", "vcrun2017",
                 "vcrun2019", "vcrun2022"
@@ -3335,6 +3418,17 @@ class InstallerApp(QWidget):
                 "mfc42", "mfc70", "mfc71", "mfc80", "mfc90", "mfc100", "mfc110",
                 "mfc120", "mfc140", "nuget", "openal", "otvdm", "otvdm090",
                 "physx", "powershell", "powershell_core"
+            ],
+            "Fuentes": [
+                "allfonts", "andale", "arial", "baekmuk", "calibri", "cambria",
+                "candara", "cjkfonts", "comicsans", "consolas", "constantia",
+                "corbel", "corefonts", "courier", "droid", "eufonts", "fakechinese",
+                "fakejapanese", "fakejapanese_ipamona", "fakejapanese_vlgothic",
+                "fakekorean", "georgia", "impact", "ipamona", "liberation",
+                "lucida", "meiryo", "micross", "opensymbol", "pptfonts",
+                "sourcehansans", "tahoma", "takao", "times", "trebuchet",
+                "uff", "unifont", "verdana", "vlgothic", "webdings",
+                "wenquanyi", "wenquanyizenhei"
             ]
         }
 
@@ -3555,10 +3649,12 @@ class InstallerApp(QWidget):
         if not wine_executable or not Path(wine_executable).is_file():
             raise FileNotFoundError(f"Ejecutable de Wine no encontrado: {wine_executable}")
 
-        progress_dialog = QProgressDialog("Inicializando Prefijo de Wine/Proton...", "Cancelar", 0, 0, self)
+        progress_dialog = QProgressDialog("Inicializando Prefijo de Wine/Proton...", "", 0, 0, self)
         progress_dialog.setWindowTitle("Inicializacion del Prefijo")
         progress_dialog.setWindowModality(Qt.WindowModal)
         progress_dialog.setCancelButton(None)
+        progress_dialog.setFixedSize(450, 150) # Set fixed size for progress dialog
+        self.config_manager.apply_theme_to_dialog(progress_dialog) # Apply theme to progress dialog
         progress_dialog.show()
 
         try:
@@ -3572,6 +3668,7 @@ class InstallerApp(QWidget):
             log_output = ""
             for line in process.stdout:
                 log_output += line
+                progress_dialog.setLabelText(f"Inicializando Prefijo de Wine/Proton...\n{line.strip()}")
                 QApplication.processEvents()
             process.wait(timeout=60)
 
@@ -3758,20 +3855,27 @@ class InstallerApp(QWidget):
         destination_path = self._get_backup_destination_path(current_config_name, source_to_backup)
 
         # Show confirmation dialog for manual backup
-        reply = QMessageBox.question(
-            self, "Confirmar Backup",
-            f"¿Deseas realizar un backup del prefijo '{source_to_backup.name}' de la configuración '{current_config_name}' a '{destination_path}'?",
-            QMessageBox.Yes | QMessageBox.No
-        )
+        msg_box = QMessageBox(self) # Create a QMessageBox instance
+        msg_box.setWindowTitle("Confirmar Backup")
+        msg_box.setText(f"¿Deseas realizar un backup del prefijo '{source_to_backup.name}' de la configuración '{current_config_name}' a '{destination_path}'?")
+        msg_box.setIcon(QMessageBox.Question)
 
-        if reply == QMessageBox.Yes:
+        yes_button = msg_box.addButton("Sí", QMessageBox.YesRole)
+        no_button = msg_box.addButton("No", QMessageBox.NoRole)
+        msg_box.setDefaultButton(yes_button)
+        self.config_manager.apply_theme_to_dialog(msg_box) # Apply theme to the message box
+
+        msg_box.exec_()
+
+        if msg_box.clickedButton() == yes_button:
             # Show progress dialog immediately upon confirmation
             self.backup_progress_dialog = QProgressDialog("Preparando backup...", "", 0, 100, self)
-            self.backup_progress_dialog.setWindowTitle("Realizar Backup") # Changed title to "Realizar Backup"
+            self.backup_progress_dialog.setWindowTitle("Progreso del Backup") # Changed title to "Progreso del Backup"
             self.backup_progress_dialog.setWindowModality(Qt.WindowModal)
             self.backup_progress_dialog.setCancelButton(None) # Remove cancel button as requested
             self.backup_progress_dialog.setRange(0, 0) # Indeterminate progress
             self.backup_progress_dialog.setFixedSize(450, 150)
+            self.config_manager.apply_theme_to_dialog(self.backup_progress_dialog) # Apply theme to progress dialog
             self.backup_progress_dialog.show()
 
             self.backup_thread = BackupThread(source_to_backup, destination_path, self.config_manager)
@@ -3821,6 +3925,7 @@ class InstallerApp(QWidget):
             self.backup_progress_dialog.setCancelButton(None) # Remove cancel button as requested
             self.backup_progress_dialog.setRange(0, 0) # Indeterminate progress
             self.backup_progress_dialog.setFixedSize(450, 150)
+            self.config_manager.apply_theme_to_dialog(self.backup_progress_dialog) # Apply theme to progress dialog
             self.backup_progress_dialog.show()
 
             self.backup_thread = BackupThread(source_to_backup, destination_path, self.config_manager)
