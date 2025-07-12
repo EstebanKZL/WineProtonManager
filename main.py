@@ -1,32 +1,62 @@
 import sys
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QApplication, QPushButton
+from PyQt5.QtCore import Qt, QProcess, QSize
+from PyQt5.QtGui import QIcon
 
-# Import your modularized components
 from config_manager import ConfigManager
-from ui.main_window import InstallerApp # Corrected import path
+from ui.main_window import InstallerApp # Importar InstallerApp de su nuevo módulo
+from styles import apply_breeze_style_to_widget # Importar la función de aplicación de estilo
 
 if __name__ == "__main__":
-    # Enable High DPI scaling for better appearance on high-resolution displays
-    if hasattr(Qt, 'AA_EnableHighDpiScaling'):
-        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    if hasattr(Qt, 'AA_UseHighDpiPixmaps'):
-        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    # Aumentar el límite de recursión por defecto (precaución: puede consumir más memoria)
+    sys.setrecursionlimit(3000)
 
-    app = QApplication(sys.argv)
-    app.setStyle("Fusion") # Use Fusion style for a more consistent look across platforms
+    try:
+        # Habilitar escalado DPI para pantallas de alta resolución
+        if hasattr(Qt, 'AA_EnableHighDpiScaling'):
+            QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        if hasattr(Qt, 'AA_UseHighDpiPixmaps'):
+            QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
-    config_manager = ConfigManager()
-    installer = InstallerApp(config_manager)
-    
-    # Adjust window size to screen if it's too large
-    screen = app.primaryScreen().availableGeometry()
-    window_size = config_manager.get_window_size()
-    
-    if window_size.width() > screen.width() * 0.9 or window_size.height() > screen.height() * 0.9:
-        installer.resize(int(screen.width() * 0.8), int(screen.height() * 0.8))
-    else:
-        installer.resize(window_size)
-        
-    installer.show()
-    sys.exit(app.exec_())
+        app = QApplication(sys.argv)
+        app.setStyle("Fusion") # Fusion es un buen estilo base para temas personalizados
+
+        # PASO CRÍTICO: Instanciar ConfigManager PRIMERO
+        # Y pasar una referencia a la aplicación (app) para que ConfigManager pueda interactuar con ella si es necesario,
+        # aunque en este caso la referencia a 'app_instance' en ConfigManager no se usa para consultar el estado de los hilos de InstallerApp.
+        # En su lugar, el InstallerApp se encargará de pasar su propia referencia a ConfigManager.
+        config_manager = ConfigManager(None) # Temporalmente sin app_instance, se asignará más tarde.
+
+        # Luego, instanciar InstallerApp con el config_manager ya creado
+        installer = InstallerApp(config_manager)
+
+        # Ahora que installer tiene una referencia válida, se actualiza la referencia interna en config_manager
+        # (Aunque en este código en particular, la referencia app_instance en ConfigManager no es estrictamente usada
+        # para la lógica de los botones en ConfigDialog. La ConfigDialog ya consulta directamente a InstallerApp.
+        # Pero es una buena práctica asegurar la bidireccionalidad si fuera necesaria.)
+        config_manager.app_instance = installer
+
+        # Ajustar tamaño de la ventana al tamaño guardado o por defecto, y limitarlo a la pantalla disponible
+        screen = app.primaryScreen().availableGeometry()
+        window_size = config_manager.get_window_size()
+
+        # Ajustar el tamaño si es demasiado grande para la pantalla
+        if window_size.width() > screen.width() * 0.9 or window_size.height() > screen.height() * 0.9:
+            installer.resize(int(screen.width() * 0.8), int(screen.height() * 0.8))
+        else:
+            installer.resize(window_size)
+
+        installer.show()
+        sys.exit(app.exec_())
+    except RecursionError:
+        print("\n=== RecursionError detectado ===")
+        import traceback
+        traceback.print_exc()
+        print("===================================")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n=== Error inesperado: {e} ===")
+        import traceback
+        traceback.print_exc()
+        print("==============================")
+        sys.exit(1)
