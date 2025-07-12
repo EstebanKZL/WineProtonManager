@@ -1,8 +1,8 @@
-from dialogs.config_dialog import ConfigDialog
-from dialogs.repository_dialog import RepositoryDialog
-from dialogs.select_groups_dialog import SelectGroupsDialog
-from dialogs.custom_program_dialog import CustomProgramDialog
-from dialogs.manage_programs_dialog import ManageProgramsDialog
+from .config_dialog import ConfigDialog
+from .custom_program_dialog import CustomProgramDialog
+from .manage_programs_dialog import ManageProgramsDialog
+from .repository_dialog import RepositoryDialog
+from .select_groups_dialog import SelectGroupsDialog
 
 __all__ = [
     'ConfigDialog',
