@@ -1,117 +1,33 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QDialogButtonBox, QHeaderView, QPushButton, QLabel, QGroupBox, QApplication, QWidget
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPalette, QColor, QFont
+from PyQt5.QtWidgets import (
+    QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QDialogButtonBox,
+    QHeaderView
+)
+from PyQt5.QtCore import Qt # Asegúrate de que Qt esté importado
+from PyQt5.QtGui import QFont
 
-# Import the specific color constants you need directly from styles.py
-from styles import STYLE_STEAM_DECK, COLOR_PRIMARY, COLOR_ACCENT, COLOR_PRESSED, \
-                   COLOR_DISABLED_BG_LIGHT, COLOR_DISABLED_TEXT_LIGHT, COLOR_BORDER_LIGHT, \
-                   COLOR_DARK_TEXT, COLOR_DARK_WINDOW, COLOR_DARK_WINDOW_TEXT, COLOR_DARK_BASE, \
-                   COLOR_DARK_BUTTON, COLOR_DARK_BUTTON_TEXT, COLOR_DARK_HIGHLIGHT, \
-                   COLOR_DARK_HIGHLIGHT_TEXT, COLOR_DARK_BORDER, \
-                   COLOR_LIGHT_WINDOW, COLOR_LIGHT_WINDOW_TEXT, COLOR_LIGHT_BASE, \
-                   COLOR_LIGHT_TEXT, COLOR_LIGHT_BUTTON, COLOR_LIGHT_BUTTON_TEXT, \
-                   COLOR_LIGHT_HIGHLIGHT, COLOR_LIGHT_HIGHLIGHT_TEXT, COLOR_LIGHT_BORDER
-# Assuming ConfigManager is in ../config_manager.py
-from config_manager import ConfigManager # Corrected import path
+from styles import STYLE_BREEZE, COLOR_BREEZE_PRIMARY, apply_breeze_style_to_widget
+
 class SelectGroupsDialog(QDialog):
-    def __init__(self, component_groups: dict[str, list[str]], config_manager: ConfigManager, parent: QWidget | None = None): # Añadir config_manager
+    def __init__(self, component_groups: dict[str, list[str]], config_manager, parent=None):
         super().__init__(parent)
         self.component_groups = component_groups
-        self.config_manager = config_manager # Guardar la instancia de config_manager
+        self.config_manager = config_manager # Pasar config_manager para aplicar estilos
         self.setWindowTitle("Seleccionar Componentes de Winetricks")
-        self.setMinimumSize(500, 450)
+        self.setMinimumSize(600, 550)
         self.setup_ui()
-        self.apply_steamdeck_style()
-
-    def apply_steamdeck_style(self):
-        self.setFont(STYLE_STEAM_DECK["font"])
-        theme_is_dark = self.config_manager.get_theme() == "dark"
-
-        base_font_size = STYLE_STEAM_DECK["font"].pointSize()
-        tree_font_size = base_font_size + 3
-
-        if theme_is_dark:
-            # REMOVE .name() here
-            tree_bg_color = COLOR_DARK_WINDOW
-            tree_text_color = COLOR_DARK_TEXT
-            tree_border_color = COLOR_DARK_BORDER
-            tree_header_bg_color = COLOR_DARK_BUTTON
-            tree_header_text_color = COLOR_DARK_TEXT
-        else:
-            # REMOVE .name() here
-            tree_bg_color = COLOR_LIGHT_BASE
-            tree_text_color = COLOR_LIGHT_TEXT
-            tree_border_color = COLOR_LIGHT_BORDER
-            # Here, STYLE_STEAM_DECK["light_palette"]["button"] is a QColor, so .name() IS appropriate if you wanted that specific color.
-            # However, if you want it to be a direct string like the others, stick to a COLOR_ constant.
-            # I'll change it to COLOR_LIGHT_WINDOW to match the simple string pattern.
-            tree_header_bg_color = COLOR_LIGHT_WINDOW # Use a direct string constant
-            tree_header_text_color = COLOR_LIGHT_TEXT
-
-        self.tree.setStyleSheet(f"""
-            QTreeWidget {{
-                background-color: {tree_bg_color};
-                color: {tree_text_color};
-                border: 1px solid {tree_border_color};
-                font-size: {tree_font_size}px;
-            }}
-            QTreeWidget::item {{
-                padding: 4px;
-            }}
-            QTreeWidget::item:selected {{
-                background-color: {COLOR_PRIMARY};
-                color: white;
-            }}
-            QHeaderView::section {{
-                background-color: {tree_header_bg_color};
-                padding: 8px;
-                border: 1px solid {tree_border_color};
-                font-weight: bold;
-                color: {tree_header_text_color};
-            }}
-        """)
-
-        for widget in self.findChildren(QWidget):
-            if isinstance(widget, QPushButton):
-                widget.setStyleSheet(STYLE_STEAM_DECK["dark_button_style"] if theme_is_dark else STYLE_STEAM_DECK["button_style"])
-            elif isinstance(widget, QGroupBox):
-                widget.setFont(STYLE_STEAM_DECK["title_font"])
-                widget.setStyleSheet(STYLE_STEAM_DECK["dark_groupbox_style"] if theme_is_dark else STYLE_STEAM_DECK["groupbox_style"])
-            elif isinstance(widget, QLabel):
-                widget.setFont(STYLE_STEAM_DECK["font"])
-            
-        # Aplicar paleta para el fondo y texto general del dialogo
-        palette = QPalette()
-        if theme_is_dark:
-            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["dark_palette"]["window"])
-            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["dark_palette"]["window_text"])
-            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["dark_palette"]["base"]) # Para fondos de entrada de texto, etc.
-            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["dark_palette"]["text"])
-            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["dark_palette"]["highlight"])
-            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["dark_palette"]["highlight_text"])
-        else:
-            palette.setColor(QPalette.Window, STYLE_STEAM_DECK["light_palette"]["window"])
-            palette.setColor(QPalette.WindowText, STYLE_STEAM_DECK["light_palette"]["window_text"])
-            palette.setColor(QPalette.Base, STYLE_STEAM_DECK["light_palette"]["base"])
-            palette.setColor(QPalette.Text, STYLE_STEAM_DECK["light_palette"]["text"])
-            palette.setColor(QPalette.Highlight, STYLE_STEAM_DECK["light_palette"]["highlight"])
-            palette.setColor(QPalette.HighlightedText, STYLE_STEAM_DECK["light_palette"]["highlight_text"])
-        self.setPalette(palette)
-        # Forzar repintado para asegurar que los estilos se apliquen inmediatamente
-        self.repaint()
-
+        self.config_manager.apply_breeze_style_to_widget(self)
 
     def setup_ui(self):
         layout = QVBoxLayout()
-        
+
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Componente", "Descripcion"])
+        self.tree.setHeaderLabels(["Componente", "Descripción"])
         self.tree.setColumnCount(2)
-        self.tree.setSelectionMode(QTreeWidget.NoSelection) # Deshabilitar seleccion de fila, solo casillas
-        self.tree.itemChanged.connect(self._handle_item_change) # Conectar para manejar el estado de tres estados
-        
+        self.tree.setSelectionMode(QTreeWidget.NoSelection) # No permitir selección de ítems
+        self.tree.itemChanged.connect(self._handle_item_change) # Conectar la señal de cambio de estado de checkbox
+
+        # Descripciones detalladas para componentes comunes de Winetricks
         self.component_descriptions = {
-            # Bibliotecas Visual Basic
             "vb2run": "Runtime de Visual Basic 2.0",
             "vb3run": "Runtime de Visual Basic 3.0",
             "vb4run": "Runtime de Visual Basic 4.0",
@@ -437,25 +353,82 @@ class SelectGroupsDialog(QDialog):
             "otvdm090": "Emulador Win16 (otvdm 0.9.0)",
             "physx": "PhysX",
             "powershell": "PowerShell para Wine",
-            "powershell_core": "PowerShell Core"
+            "powershell_core": "PowerShell Core",
+            
+            # Fuentes
+            "allfonts": "Paquete completo de fuentes",
+            "andale": "Fuente Andale Mono",
+            "arial": "Fuente Arial",
+            "baekmuk": "Fuentes coreanas Baekmuk",
+            "calibri": "Fuente Calibri",
+            "cambria": "Fuente Cambria",
+            "candara": "Fuente Candara",
+            "cjkfonts": "Fuentes CJK (chino-japonés-coreano)",
+            "comicsans": "Fuente Comic Sans MS",
+            "consolas": "Fuente Consolas",
+            "constantia": "Fuente Constantia",
+            "corbel": "Fuente Corbel",
+            "corefonts": "Fuentes básicas de Microsoft",
+            "courier": "Fuente Courier New",
+            "droid": "Fuentes Droid (Android)",
+            "eufonts": "Fuentes europeas adicionales",
+            "fakechinese": "Fuentes chinas simuladas",
+            "fakejapanese": "Fuentes japonesas simuladas",
+            "fakejapanese_ipamona": "Fuente japonesa simulada IPAMona",
+            "fakejapanese_vlgothic": "Fuente japonesa simulada VL Gothic",
+            "fakekorean": "Fuentes coreanas simuladas",
+            "georgia": "Fuente Georgia",
+            "impact": "Fuente Impact",
+            "ipamona": "Fuente japonesa IPAMona",
+            "liberation": "Fuentes Liberation (alternativas open-source)",
+            "lucida": "Fuente Lucida Console",
+            "meiryo": "Fuente japonesa Meiryo",
+            "micross": "Fuente Microsoft Sans Serif",
+            "opensymbol": "Fuente OpenSymbol",
+            "pptfonts": "Fuentes para presentaciones PowerPoint",
+            "sourcehansans": "Fuente Source Han Sans",
+            "tahoma": "Fuente Tahoma",
+            "takao": "Fuente japonesa Takao",
+            "times": "Fuente Times New Roman",
+            "trebuchet": "Fuente Trebuchet MS",
+            "uff": "Formato de fuente universal",
+            "unifont": "Fuente Unifont",
+            "verdana": "Fuente Verdana",
+            "vlgothic": "Fuente japonesa VL Gothic",
+            "webdings": "Fuente Webdings",
+            "wenquanyi": "Fuente china WenQuanYi",
+            "wenquanyizenhei": "Fuente china WenQuanYi Zen Hei"
         }
-        
+
+        # MODIFICACIÓN 3: Aumentar tamaño de fuente en 3 puntos
+        base_font = STYLE_BREEZE["font"]
+        tree_font_size = base_font.pointSize() + 0
+        font_for_tree = QFont(base_font.family(), tree_font_size)
+
+
+        # Llenar el árbol con grupos y componentes
         for group_name, components in self.component_groups.items():
             group_item = QTreeWidgetItem(self.tree)
             group_item.setText(0, group_name)
+            group_item.setFont(0, font_for_tree) # Aplicar la fuente al grupo
+            # Marcar el ítem del grupo como chequeable con tres estados (Qt.PartiallyChecked)
             group_item.setFlags(group_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsTristate)
-            group_item.setCheckState(0, Qt.PartiallyChecked) # Por defecto, en estado parcial
-            
+            group_item.setCheckState(0, Qt.PartiallyChecked) # Estado inicial
+
             for comp in components:
                 child_item = QTreeWidgetItem(group_item)
                 child_item.setText(0, comp)
+                child_item.setFont(0, font_for_tree) # Aplicar la fuente al componente
                 child_item.setFlags(child_item.flags() | Qt.ItemIsUserCheckable)
-                child_item.setCheckState(0, Qt.Unchecked)
-                
-                description = self.component_descriptions.get(comp, "Componente estandar de Winetricks.")
+                child_item.setCheckState(0, Qt.Unchecked) # Por defecto desmarcado
+
+                # Asignar descripción o una genérica
+                description = self.component_descriptions.get(comp, "Componente estándar de Winetricks.")
                 child_item.setText(1, description)
-        
-        self.tree.expandAll()
+                child_item.setFont(1, font_for_tree) # Aplicar la fuente a la descripción
+
+        self.tree.expandAll() # Expandir todos los grupos por defecto
+        # Ajustar el tamaño de las columnas
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
         layout.addWidget(self.tree)
@@ -469,34 +442,40 @@ class SelectGroupsDialog(QDialog):
         self.setLayout(layout)
 
     def _handle_item_change(self, item: QTreeWidgetItem, column: int):
-        """Maneja el estado de las casillas de verificacion de los elementos del arbol (tres estados)."""
-        if item.flags() & Qt.ItemIsTristate: # Es un nodo padre (grupo)
-            # Bloquear temporalmente las senales para evitar llamadas recursivas al establecer estados de hijos
-            self.tree.blockSignals(True)
+        """Maneja el estado de las casillas de verificación de los elementos del árbol (tres estados)."""
+        # Desconectar temporalmente la señal para evitar recursión infinita
+        try:
+            self.tree.itemChanged.disconnect(self._handle_item_change)
+        except TypeError: # Si ya está desconectada (por ejemplo, en la primera llamada)
+            pass
+
+        if item.flags() & Qt.ItemIsTristate: # Si es un ítem de grupo (tristate)
             if item.checkState(0) == Qt.Checked:
                 for i in range(item.childCount()):
                     item.child(i).setCheckState(0, Qt.Checked)
             elif item.checkState(0) == Qt.Unchecked:
                 for i in range(item.childCount()):
                     item.child(i).setCheckState(0, Qt.Unchecked)
-            self.tree.blockSignals(False)
-        else: # Es un nodo hijo (componente individual)
+        else: # Si es un ítem hijo
             parent = item.parent()
             if parent:
                 checked_children = 0
                 for i in range(parent.childCount()):
                     if parent.child(i).checkState(0) == Qt.Checked:
                         checked_children += 1
-                
-                # Actualizar el estado del padre segun los hijos
+
                 if checked_children == 0:
                     parent.setCheckState(0, Qt.Unchecked)
                 elif checked_children == parent.childCount():
                     parent.setCheckState(0, Qt.Checked)
                 else:
                     parent.setCheckState(0, Qt.PartiallyChecked)
+        # Reconectar la señal
+        self.tree.itemChanged.connect(self._handle_item_change)
+
 
     def get_selected_components(self) -> list[str]:
+        """Devuelve una lista de los componentes de Winetricks seleccionados."""
         selected = []
         root = self.tree.invisibleRootItem()
         for i in range(root.childCount()):
