@@ -1,27 +1,17 @@
-from PyQt5.QtWidgets import QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QPushButton, QLabel, QApplication, QWidget
-from PyQt5.QtGui import QPalette, QColor
-from styles import STYLE_STEAM_DECK # Import the style constants
+from PyQt5.QtWidgets import (
+    QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QMessageBox
+)
+
+from config_manager import ConfigManager
 
 class RepositoryDialog(QDialog):
-    def __init__(self, repo_type: str, parent: QWidget | None = None):
+    def __init__(self, repo_type: str, config_manager, parent=None):
         super().__init__(parent)
         self.repo_type = repo_type
-        self.setWindowTitle(f"Anadir Repositorio de {self.repo_type.capitalize()}")
+        self.config_manager = config_manager # Pasar config_manager para aplicar estilos
+        self.setWindowTitle(f"Añadir Repositorio de {self.repo_type.capitalize()}")
         self.setup_ui()
-        self.apply_steamdeck_style()
-
-    def apply_steamdeck_style(self):
-        self.setFont(STYLE_STEAM_DECK["font"])
-        # Comprobar la paleta de la aplicacion actual para determinar si el tema oscuro esta activo
-        # This will be handled by the parent ConfigDialog's apply_theme_to_dialog method now.
-        # But we can still ensure internal elements use the correct button/label styles.
-        theme_is_dark = QApplication.palette().color(QPalette.Window).name() == QColor(STYLE_STEAM_DECK["dark_palette"]["window"]).name()
-
-        for widget in self.findChildren(QWidget):
-            if isinstance(widget, QPushButton):
-                widget.setStyleSheet(STYLE_STEAM_DECK["dark_button_style"] if theme_is_dark else STYLE_STEAM_DECK["button_style"])
-            elif isinstance(widget, QLabel):
-                widget.setFont(STYLE_STEAM_DECK["font"])
+        self.config_manager.apply_breeze_style_to_widget(self)
 
     def setup_ui(self):
         layout = QFormLayout()
@@ -30,6 +20,7 @@ class RepositoryDialog(QDialog):
         layout.addRow("Nombre del Repositorio:", self.edit_name)
 
         self.edit_url = QLineEdit()
+        self.edit_url.setPlaceholderText("Ej: https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases")
         layout.addRow("URL de la API de GitHub:", self.edit_url)
 
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -40,14 +31,15 @@ class RepositoryDialog(QDialog):
         self.setLayout(layout)
 
     def get_repository_info(self) -> tuple[str, str]:
+        """Obtiene el nombre y la URL del repositorio ingresados."""
         name = self.edit_name.text().strip()
         url = self.edit_url.text().strip()
 
         if not name:
-            raise ValueError("El nombre del repositorio no puede estar vacio.")
+            raise ValueError("El nombre del repositorio no puede estar vacío.")
         if not url:
-            raise ValueError("La URL de la API de GitHub no puede estar vacia.")
+            raise ValueError("La URL de la API de GitHub no puede estar vacía.")
         if not url.startswith("https://api.github.com/repos/"):
-            raise ValueError("URL de la API de GitHub invalida. Debe comenzar con 'https://api.github.com/repos/'.")
+            raise ValueError("URL de la API de GitHub inválida. Debe comenzar con 'https://api.github.com/repos/'.")
 
         return name, url
