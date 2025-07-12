@@ -1,31 +1,21 @@
-from PyQt5.QtWidgets import QDialog, QFormLayout, QLineEdit, QPushButton, QHBoxLayout, QDialogButtonBox, QLabel, QGroupBox, QApplication, QWidget, QMessageBox, QFileDialog
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPalette, QColor
 from pathlib import Path
 
-from styles import STYLE_STEAM_DECK # Import the style constants
-from config_manager import ConfigManager # Corrected import path
+from PyQt5.QtWidgets import (
+    QDialog, QFormLayout, QLineEdit, QPushButton, QFileDialog,
+    QDialogButtonBox, QMessageBox, QHBoxLayout
+)
+from PyQt5.QtCore import Qt, QDir
+from config_manager import ConfigManager
 
 class CustomProgramDialog(QDialog):
-    def __init__(self, config_manager: ConfigManager, parent: QWidget | None = None):
+    def __init__(self, config_manager: ConfigManager, parent: None = None):
         super().__init__(parent)
-        self.config_manager = config_manager
-        self.setWindowTitle("Anadir Programa Personalizado")
+        self.config_manager = config_manager # Pasar config_manager para aplicar estilos
+        self.setWindowTitle("Añadir Programa Personalizado")
+        # MODIFICACIÓN 2: Establecer tamaño fijo
+        self.setFixedSize(650, 140) # Establecer un tamaño fijo
         self.setup_ui()
-        self.apply_steamdeck_style()
-
-    def apply_steamdeck_style(self):
-        self.setFont(STYLE_STEAM_DECK["font"])
-        theme = self.config_manager.get_theme()
-        
-        for widget in self.findChildren(QWidget):
-            if isinstance(widget, QPushButton):
-                widget.setStyleSheet(STYLE_STEAM_DECK["dark_button_style"] if theme == "dark" else STYLE_STEAM_DECK["button_style"])
-            elif isinstance(widget, QGroupBox):
-                widget.setFont(STYLE_STEAM_DECK["title_font"])
-                widget.setStyleSheet(STYLE_STEAM_DECK["dark_groupbox_style"] if theme == "dark" else STYLE_STEAM_DECK["groupbox_style"])
-            elif isinstance(widget, QLabel):
-                widget.setFont(STYLE_STEAM_DECK["font"])
+        self.config_manager.apply_breeze_style_to_widget(self)
 
     def setup_ui(self):
         layout = QFormLayout()
@@ -42,63 +32,59 @@ class CustomProgramDialog(QDialog):
         path_layout.addWidget(self.btn_path)
         layout.addRow("Ruta del Instalador o Comando Winetricks:", path_layout)
 
-        # Botones en la misma fila
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.button(QDialogButtonBox.Ok).setAutoDefault(False)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addRow(button_box)
-        
+
         self.setLayout(layout)
 
     def browse_program(self):
+        """Abre un diálogo para seleccionar el programa o script."""
         default_dir = self.config_manager.programs_dir
-        
+
         dialog = QFileDialog(self)
-        dialog.setOption(QFileDialog.DontUseNativeDialog)
-        # MODIFICATION START: Changed from QFileDialog.Directory to QFileDialog.ExistingFile
-        dialog.setFileMode(QFileDialog.ExistingFile) 
-        # MODIFICATION START: Added filters for common executable and script types
-        dialog.setNameFilter("Windows Executables (*.exe *.msi);;Winetricks Scripts (*.wtr);;All Files (*)")
-        # MODIFICATION END
+        dialog.setOption(QFileDialog.DontUseNativeDialog) # Usar diálogo nativo de Qt para un control más consistente
+        dialog.setFileMode(QFileDialog.ExistingFile)
+        dialog.setNameFilter("Ejecutables de Windows (*.exe *.msi);;Scripts de Winetricks (*.wtr);;Todos los Archivos (*)")
+        dialog.setFilter(QDir.AllEntries | QDir.Hidden | QDir.NoDotAndDotDot)
         dialog.setDirectory(str(default_dir))
-        
-        # CORRECTED: Call apply_theme_to_dialog from the config_manager
-        self.config_manager.apply_theme_to_dialog(dialog)
+
+        self.config_manager.apply_breeze_style_to_widget(dialog) # Aplicar estilo al diálogo de archivo
 
         if dialog.exec_():
             selected_file = dialog.selectedFiles()
             if selected_file:
-                # selected_file[0] will now be the path to the selected file
                 self.edit_path.setText(selected_file[0])
 
     def get_program_info(self) -> dict:
+        """Obtiene la información del programa ingresado."""
         name = self.edit_name.text().strip()
         path = self.edit_path.text().strip()
-        
+
         if not name:
             raise ValueError("Debes especificar un nombre para el programa.")
-            
-        program_type = "winetricks" # Valor por defecto
-        
-        # Determinar el tipo de programa
+
+        program_type = "winetricks" # Valor por defecto si no se puede determinar por extensión
+
         path_obj = Path(path)
         if path.lower().endswith(('.exe', '.msi')):
             if not path_obj.exists():
                 raise FileNotFoundError(f"Archivo no encontrado: {path}")
             program_type = "exe"
-            path = str(path_obj.absolute()) # Asegurar ruta absoluta
-        elif path.lower().endswith('.wtr'): # Nuevo tipo: script de winetricks
+            path = str(path_obj.absolute()) # Guardar la ruta absoluta
+        elif path.lower().endswith('.wtr'):
             if not path_obj.exists():
                 raise FileNotFoundError(f"Archivo de script no encontrado: {path}")
             program_type = "wtr"
-            path = str(path_obj.absolute())
-        else: # Asumir que es un componente de winetricks (ej., vcrun2015)
+            path = str(path_obj.absolute()) # Guardar la ruta absoluta
+        else:
+            # Si no es .exe, .msi o .wtr, se asume que es un comando de winetricks (ej. "vcrun2019")
             program_type = "winetricks"
-            # La validacion para componentes de winetricks se realiza al ejecutar winetricks.
-            
+
         return {
             "name": name,
-            "path": path,
+            "path": path, # path puede ser un nombre de componente o una ruta de archivo
             "type": program_type
         }
