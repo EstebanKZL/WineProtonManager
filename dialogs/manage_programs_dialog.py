@@ -1,14 +1,15 @@
 from pathlib import Path
+import shutil
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QHeaderView, QMessageBox
+    QTableWidgetItem, QHeaderView, QMessageBox, QWidget
 )
 from PyQt5.QtCore import Qt
 from config_manager import ConfigManager
 
 class ManageProgramsDialog(QDialog):
-    def __init__(self, config_manager: ConfigManager, parent: None = None):
+    def __init__(self, config_manager: ConfigManager, parent: QWidget | None = None):
         super().__init__(parent)
         self.config_manager = config_manager # Pasar config_manager para aplicar estilos
         self.setWindowTitle("Gestionar Programas Guardados")
@@ -103,11 +104,7 @@ class ManageProgramsDialog(QDialog):
                     item_already_installed = True
             elif program_info["type"] == "wtr":
                 wtr_filename = Path(program_info["path"]).name
-                # Nota: Es posible que los scripts .wtr no se registren directamente por su nombre de archivo.
-                # Esta verificación podría ser menos precisa para .wtr a menos que el script
-                # registre un nombre específico. Para ser precisos, habría que parsear el .wtr
-                # para ver qué componente(s) de winetricks instala y verificar esos.
-                # Por simplicidad, se mantiene la lógica actual.
+
                 if wtr_filename in installed_items_in_prefix: # Esto asume que el nombre del script se registra.
                     item_already_installed = True
 
@@ -116,7 +113,7 @@ class ManageProgramsDialog(QDialog):
                                              f"El programa '{program_info['name']}' ya está registrado como instalado en este prefijo ({current_config_name}). ¿Deseas agregarlo a la lista de instalación de todos modos?",
                                              QMessageBox.Yes | QMessageBox.No)
                 if reply == QMessageBox.No:
-                    continue # No añadir si el usuario elige no hacerlo
+                    continue # No añadir if user chooses not to
 
             programs_to_add.append(program_info)
 

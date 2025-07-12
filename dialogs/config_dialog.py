@@ -1,5 +1,6 @@
 import sys
 import subprocess
+import shutil
 from pathlib import Path
 from functools import partial
 
@@ -381,7 +382,6 @@ class ConfigDialog(QDialog):
         versions_layout.addLayout(buttons_layout)
         self.group_proton_versions.setLayout(versions_layout)
         proton_inner_layout.addWidget(self.group_proton_versions) # Añadir al layout interno de proton_tab
-        # self.proton_tab.setLayout(proton_inner_layout) # Ya se asignó en el constructor del layout
 
         # Configuración de la pestaña Wine
         wine_inner_layout = QVBoxLayout(self.wine_tab) # Nuevo layout para el contenido de wine_tab
@@ -861,8 +861,7 @@ class ConfigDialog(QDialog):
         self.theme_combo.addItems(["Claro", "Oscuro"])
         current_theme = self.config_manager.get_theme()
         self.theme_combo.setCurrentText("Oscuro" if current_theme == "dark" else "Claro")
-        # [MODIFICACIÓN 3] Desconectado para que el tema solo cambie al reiniciar la app.
-        # self.theme_combo.currentTextChanged.connect(self._apply_theme_setting)
+
         install_options_layout.addRow("Tema de Interfaz:", self.theme_combo)
 
         silent_layout = QHBoxLayout()
@@ -886,18 +885,8 @@ class ConfigDialog(QDialog):
         install_options_group.setLayout(install_options_layout)
         main_layout.addWidget(install_options_group)
 
-        backup_options_group = QGroupBox("Opciones de Backup")
+        backup_options_group = QGroupBox("Opciones de Backup") # Todavía usamos el grupo para la última opción
         backup_options_layout = QFormLayout()
-
-        automatic_backup_layout = QHBoxLayout()
-        automatic_backup_label = QLabel("Crear nueva carpeta con timestamp para cada backup")
-        self.checkbox_automatic_backup = QCheckBox()
-        self.checkbox_automatic_backup.setToolTip("Si está activado, cada backup creará una nueva carpeta única con un timestamp. Si está desactivado, los backups se guardarán de forma incremental en la carpeta pfx o APPID")
-        self.checkbox_automatic_backup.setChecked(self.config_manager.get_automatic_backup_enabled())
-        automatic_backup_layout.addWidget(automatic_backup_label)
-        automatic_backup_layout.addStretch()
-        automatic_backup_layout.addWidget(self.checkbox_automatic_backup)
-        backup_options_layout.addRow(automatic_backup_layout)
 
         ask_for_backup_layout = QHBoxLayout()
         ask_for_backup_label = QLabel("Preguntar por backup antes de iniciar una herramienta/instalación")
@@ -939,25 +928,20 @@ class ConfigDialog(QDialog):
         Ahora solo actualiza la configuración en memoria. El cambio real se aplica al reiniciar la app."""
         theme_name = "dark" if text == "Oscuro" else "light"
         self.config_manager.set_theme(theme_name)
-        # self.config_manager.apply_breeze_style_to_widget(self) # Ya no se aplica inmediatamente globalmente
 
     def save_settings(self):
         """Guarda los ajustes generales de la aplicación."""
         try:
             winetricks_path_ok = self.config_manager.set_winetricks_path(self.edit_winetricks_path.text().strip())
 
-            # [MODIFICACIÓN 2] El tema ahora se actualiza aquí y se guarda en el archivo.
-            # La aplicación visualmente no cambia hasta el reinicio.
             theme = "dark" if self.theme_combo.currentText() == "Oscuro" else "light"
             self.config_manager.set_theme(theme) # Actualiza self.configs["settings"]["theme"]
             self.config_manager.save_configs() # Guarda la configuración actualizada en el archivo
 
             self.config_manager.set_silent_install(self.checkbox_silent_global.isChecked())
             self.config_manager.set_force_winetricks_install(self.checkbox_force_winetricks.isChecked())
-            self.config_manager.set_automatic_backup_enabled(self.checkbox_automatic_backup.isChecked())
             self.config_manager.set_ask_for_backup_before_action(self.checkbox_ask_for_backup_before_action.isChecked())
 
-            # MODIFICACIÓN 2: Mensaje informativo y reinicio de la aplicación
             QMessageBox.information(self, "Guardado", "Ajustes guardados exitosamente.\nLa aplicación se reiniciará para aplicar los cambios.")
             self.config_saved.emit() # Notificar a la ventana principal para que inicie el reinicio
             self.accept() # Cerrar el diálogo de configuración
@@ -970,7 +954,8 @@ class ConfigDialog(QDialog):
         dialog.setOption(QFileDialog.DontUseNativeDialog)
         dialog.setFileMode(QFileDialog.ExistingFile)
         dialog.setNameFilter("Ejecutables (*);;Todos los Archivos (*)")
-        dialog.setDirectory(str(Path.home()))
+        # MODIFICACIÓN 4: Usar la última ruta explorada para Winetricks
+        dialog.setDirectory(self.config_manager.get_last_browsed_dir("winetricks"))
         dialog.setFilter(QDir.AllEntries | QDir.AllDirs | QDir.NoDotAndDotDot) # Permitir directorios también
 
         self.config_manager.apply_breeze_style_to_widget(dialog) # Aplicar estilo al diálogo de archivo
@@ -979,6 +964,9 @@ class ConfigDialog(QDialog):
             selected = dialog.selectedFiles()
             if selected:
                 self.edit_winetricks_path.setText(selected[0])
+                # MODIFICACIÓN 4: Guardar la nueva ruta explorada
+                self.config_manager.set_last_browsed_dir("winetricks", str(Path(selected[0]).parent))
+
 
     def load_configs(self):
         """Carga y muestra las configuraciones guardadas."""
@@ -1138,36 +1126,43 @@ class ConfigDialog(QDialog):
 
     def browse_prefix(self):
         """Abre un diálogo para seleccionar el directorio de prefijo."""
-        path = self._get_directory_path("Seleccionar Directorio de Prefijo de Wine")
+        key = "wine_prefix" if self.config_type.currentText() == "Wine" else "proton_prefix"
+        path = self._get_directory_path("Seleccionar Directorio de Prefijo de Wine", key)
         if path:
             self.prefix_path.setText(path)
 
     def browse_wine(self):
         """Abre un diálogo para seleccionar el directorio de instalación de Wine."""
-        path = self._get_directory_path("Seleccionar Directorio de Instalación de Wine (ej., bin/wine)")
+        path = self._get_directory_path("Seleccionar Directorio de Instalación de Wine (ej., bin/wine)", "wine_install")
         if path:
             self.wine_directory.setText(path)
 
     def browse_proton(self):
         """Abre un diálogo para seleccionar el directorio de instalación de Proton."""
-        path = self._get_directory_path("Seleccionar Directorio de Instalación de Proton (ej., proton_dist/files)")
+        path = self._get_directory_path("Seleccionar Directorio de Instalación de Proton (ej., proton_dist/files)", "proton_install")
         if path:
             self.proton_directory.setText(path)
 
-    def _get_directory_path(self, title="Seleccionar Directorio") -> str | None:
-        """Helper para abrir un diálogo de selección de directorio."""
+    def _get_directory_path(self, title="Seleccionar Directorio", config_key: str = "default") -> str | None: # MODIFICACIÓN 4
+        """Helper para abrir un diálogo de selección de directorio.
+           MODIFICACIÓN 4: Ahora usa config_key para gestionar la última ruta explorada."""
         dialog = QFileDialog(self)
         dialog.setWindowTitle(title)
         dialog.setFileMode(QFileDialog.Directory)
         dialog.setOption(QFileDialog.ShowDirsOnly, True)
         dialog.setFilter(QDir.AllEntries | QDir.Hidden | QDir.NoDotAndDotDot)
-        dialog.setDirectory(str(Path.home()))
+        # MODIFICACIÓN 4: Usar la última ruta guardada
+        dialog.setDirectory(self.config_manager.get_last_browsed_dir(config_key))
 
         self.config_manager.apply_breeze_style_to_widget(dialog)
 
         if dialog.exec_() == QDialog.Accepted:
-            return dialog.selectedFiles()[0]
+            selected_path = dialog.selectedFiles()[0]
+            # MODIFICACIÓN 4: Guardar la nueva ruta explorada
+            self.config_manager.set_last_browsed_dir(config_key, selected_path)
+            return selected_path
         return None
+
 
     def test_configuration(self):
         """Prueba la configuración actual de Wine/Proton."""

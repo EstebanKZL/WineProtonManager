@@ -1,11 +1,11 @@
 from PyQt5.QtWidgets import (
-    QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QMessageBox
+    QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QMessageBox, QWidget
 )
 
 from config_manager import ConfigManager
 
 class RepositoryDialog(QDialog):
-    def __init__(self, repo_type: str, config_manager, parent=None):
+    def __init__(self, repo_type: str, config_manager: ConfigManager, parent: QWidget | None = None):
         super().__init__(parent)
         self.repo_type = repo_type
         self.config_manager = config_manager # Pasar config_manager para aplicar estilos

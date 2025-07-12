@@ -279,6 +279,7 @@ class ConfigManager:
 
         self.log_dir = self.config_dir / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.installation_log_file = self.log_dir / "installation.log"
 
         self.wine_download_dir = self.config_dir / "Wine"
         self.proton_download_dir = self.config_dir / "Proton"
@@ -289,6 +290,15 @@ class ConfigManager:
 
         self.backup_dir = self.config_dir / "Backup"
         self.backup_dir.mkdir(exist_ok=True)
+
+        self.last_browsed_dirs = {
+            "wine_prefix": str(self.wine_download_dir),
+            "proton_prefix": str(self.proton_download_dir),
+            "wine_install": str(self.wine_download_dir),
+            "proton_install": str(self.proton_download_dir),
+            "programs": str(self.programs_dir),
+            "winetricks": str(Path.home())
+        }
 
         self.configs = self._load_configs()
         self._ensure_default_config()
@@ -302,8 +312,9 @@ class ConfigManager:
             "window_size": [900, 650],
             "silent_install": True,
             "force_winetricks_install": False,
-            "automatic_backup_enabled": False,
-            "ask_for_backup_before_action": True
+            "ask_for_backup_before_action": True,
+            "last_browsed_dirs": self.last_browsed_dirs,
+            "last_full_backup_path": {} # MODIFICACIÓN: Cambiado a un diccionario para almacenar por configuración
         }
 
         default_repositories = {
@@ -322,7 +333,24 @@ class ConfigManager:
         self.configs.setdefault("custom_programs", [])
 
         for key, value in default_settings.items():
-            self.configs["settings"].setdefault(key, value)
+            # Si 'last_full_backup_path' existe pero no es un diccionario (e.g. era una cadena de texto de una versión anterior)
+            # lo convertimos a un diccionario vacío para evitar errores.
+            if key == "last_full_backup_path" and not isinstance(self.configs["settings"].get(key), dict):
+                self.configs["settings"][key] = {}
+            else:
+                self.configs["settings"].setdefault(key, value)
+
+
+        if "last_browsed_dirs" not in self.configs["settings"]:
+            self.configs["settings"]["last_browsed_dirs"] = self.last_browsed_dirs
+        else:
+            for key, default_path in self.last_browsed_dirs.items():
+                self.configs["settings"]["last_browsed_dirs"].setdefault(key, default_path)
+            self.last_browsed_dirs = self.configs["settings"]["last_browsed_dirs"]
+
+        # MODIFICACIÓN: Ya no se necesita esta línea si 'last_full_backup_path' se inicializa como {}
+        # if "last_full_backup_path" not in self.configs["settings"]:
+        #    self.configs["settings"]["last_full_backup_path"] = ""
 
         if "Wine-System" not in self.configs["configs"]:
             self.configs["configs"]["Wine-System"] = {
@@ -340,7 +368,10 @@ class ConfigManager:
 
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                loaded_configs = json.load(f)
+                if "settings" in loaded_configs and "last_browsed_dirs" in loaded_configs["settings"]:
+                    self.last_browsed_dirs = loaded_configs["settings"]["last_browsed_dirs"]
+                return loaded_configs
         except (json.JSONDecodeError, IOError) as e:
             print(f"Error cargando el archivo de configuración {self.config_file}: {e}. Se usará la configuración por defecto.")
             return {}
@@ -348,6 +379,7 @@ class ConfigManager:
     def save_configs(self):
         """Guarda las configuraciones en el archivo JSON con manejo de errores."""
         try:
+            self.configs["settings"]["last_browsed_dirs"] = self.last_browsed_dirs
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.configs, f, indent=4, ensure_ascii=False)
         except IOError as e:
@@ -466,8 +498,6 @@ class ConfigManager:
         NOTA: Para que el cambio de tema se aplique globalmente, la aplicación debe reiniciarse.
         """
         self.configs.setdefault("settings", {})["theme"] = theme
-        # El guardado se hará solo cuando el usuario haga clic en "Guardar Ajustes" en el diálogo de configuración
-        # self.save_configs() # [MODIFICACIÓN 3] Comentado para evitar el guardado inmediato.
 
     def get_theme(self) -> str:
         """Obtiene el tema actual. Por defecto es 'dark'."""
@@ -522,15 +552,6 @@ class ConfigManager:
         """Obtiene si la instalación forzada de Winetricks está habilitada. Por defecto es False."""
         return self.configs.get("settings", {}).get("force_winetricks_install", False)
 
-    def set_automatic_backup_enabled(self, enabled: bool):
-        """Establece si el backup automático está habilitado y guarda la configuración."""
-        self.configs.setdefault("settings", {})["automatic_backup_enabled"] = enabled
-        self.save_configs()
-
-    def get_automatic_backup_enabled(self) -> bool:
-        """Obtiene si el backup automático está habilitado. Por defecto es False."""
-        return self.configs.get("settings", {}).get("automatic_backup_enabled", False)
-
     def set_ask_for_backup_before_action(self, enabled: bool):
         """Establece si se pregunta por backup antes de una acción y guarda la configuración."""
         self.configs.setdefault("settings", {})["ask_for_backup_before_action"] = enabled
@@ -539,6 +560,18 @@ class ConfigManager:
     def get_ask_for_backup_before_action(self) -> bool:
         """Obtiene si se pregunta por backup antes de una acción. Por defecto es True."""
         return self.configs.get("settings", {}).get("ask_for_backup_before_action", True)
+
+    def set_last_full_backup_path(self, config_name: str, path: str):
+        """Guarda la ruta del último backup completo exitoso para una configuración específica."""
+        # Asegurarse de que el diccionario 'last_full_backup_path' exista en settings
+        self.configs.setdefault("settings", {}).setdefault("last_full_backup_path", {})
+        self.configs["settings"]["last_full_backup_path"][config_name] = path
+        self.save_configs()
+
+    def get_last_full_backup_path(self, config_name: str) -> str:
+        """Obtiene la ruta del último backup completo exitoso para una configuración específica."""
+        # Acceder al diccionario y devolver la ruta para el config_name dado, o una cadena vacía si no existe.
+        return self.configs.get("settings", {}).get("last_full_backup_path", {}).get(config_name, "")
 
     def delete_config(self, config_name: str) -> bool:
         """Elimina una configuración guardada, ajustando 'last_used' si es necesario."""
@@ -551,18 +584,22 @@ class ConfigManager:
         return False
 
     def get_installed_winetricks(self, prefix_path: str) -> list[str]:
-        """Obtiene la lista de componentes de winetricks instalados en un prefijo."""
-        wineprotonmanager_log = Path(prefix_path) / "wineprotonmanager.log"
+        """
+        Obtiene la lista de componentes de winetricks instalados en un prefijo
+        desde el archivo wineprotomanager.ini.
+        """
+        wineprotonmanager_ini = Path(prefix_path) / "wineprotonmanager.ini"
         installed = set()
-        if wineprotonmanager_log.exists():
+        if wineprotonmanager_ini.exists():
             try:
-                with open(wineprotonmanager_log, 'r', encoding='utf-8', errors='ignore') as f:
+                with open(wineprotonmanager_ini, 'r', encoding='utf-8', errors='ignore') as f:
                     for line in f:
                         match = re.search(r"installed\s+(\S+)", line)
                         if match:
                             installed.add(match.group(1))
+
             except Exception as e:
-                print(f"Error leyendo el registro de winetricks: {e}")
+                print(f"Error leyendo el archivo wineprotomanager.ini: {e}")
         return list(installed)
 
     def save_window_size(self, size: QSize):
@@ -575,28 +612,24 @@ class ConfigManager:
         size = self.configs.get("settings", {}).get("window_size", [900, 650])
         return QSize(size[0], size[1])
 
-    def get_log_path(self, program_name: str) -> Path:
-        """Obtiene la ruta al archivo de registro para un programa específico."""
-        current_config_name = self.configs.get("last_used", "default")
-        log_sub_dir = self.log_dir / current_config_name
-        log_sub_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = re.sub(r'[^\w\-_.]', '_', program_name)
-        return log_sub_dir / f"{safe_name}.log"
+    def get_log_path(self) -> Path:
+        """Obtiene la ruta al archivo de registro unificado para la instalación."""
+        return self.installation_log_file
 
     def write_to_log(self, program_name: str, message: str):
-        """Escribe un mensaje con marca de tiempo en el registro del programa."""
-        log_path = self.get_log_path(program_name)
+        """Escribe un mensaje con marca de tiempo en el registro de instalación unificado."""
+        log_path = self.get_log_path()
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         try:
             with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(f"[{timestamp}] {message}\n")
+                f.write(f"[{timestamp}] [{program_name}] {message}\n")
         except IOError as e:
             print(f"Error escribiendo en el log {log_path}: {e}")
 
     def get_backup_log_path(self) -> Path:
         """Obtiene la ruta al archivo de registro de backup."""
         current_config_name = self.configs.get("last_used", "default")
-        log_sub_dir = self.log_dir / current_config_name
+        log_sub_dir = self.log_dir / current_config_name # Todavía se mantiene un subdirectorio para logs de backup
         log_sub_dir.mkdir(parents=True, exist_ok=True)
         return log_sub_dir / "backup.log"
 
@@ -641,11 +674,19 @@ class ConfigManager:
                 return True
         return False
 
+    def get_last_browsed_dir(self, key: str) -> str:
+        """Obtiene la última carpeta explorada para una clave específica."""
+        return self.last_browsed_dirs.get(key, str(Path.home()))
+
+    def set_last_browsed_dir(self, key: str, path: str):
+        """Establece la última carpeta explorada para una clave específica."""
+        if Path(path).is_dir():
+            self.last_browsed_dirs[key] = path
+            self.save_configs() # Guardar inmediatamente para persistencia
+
     def apply_breeze_style_to_widget(self, widget: QWidget):
         """Aplica el estilo Breeze a un widget y sus hijos de forma recursiva."""
-        # [MODIFICACIÓN 3] Se mantiene la lógica para aplicar el estilo al widget y sus hijos
-        # Esto permite que los diálogos se vean con el tema actual al ser abiertos,
-        # pero el cambio global de tema en la aplicación principal requiere reinicio.
+
         theme = self.get_theme()
         style_settings = STYLE_BREEZE
 
@@ -721,7 +762,6 @@ class ConfigManager:
 
         widget.repaint()
 
-# --- Hilos de Operación ---
 class DownloadThread(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal(str)
@@ -861,7 +901,7 @@ class DecompressionThread(QThread):
                 if self.archive_path.suffix == '.zip':
                     with zipfile.ZipFile(self.archive_path, 'r') as zip_ref:
                         zip_ref.extractall(temp_unzip_dir)
-                elif self.archive_path.suffix in ['.gz', '.xz', '.bz2', '.zst'] or self.archive_path.name.endswith(('.tar.gz', '.tar.xz')):
+                elif self.archive_path.suffix in ['.gz', '.xz', '.bz2', '.zst'] or self.archive_path.name.endswith(('.tar.gz', '.tar.xz', '.tar.bz2', '.tar.zst')):
                     # Determinar el modo correcto para tarfile
                     mode = "r:" + self.archive_path.suffix[1:]
                     if self.archive_path.name.endswith('.tar.gz'):
@@ -969,7 +1009,7 @@ class InstallerThread(QThread):
             self.progress.emit(display_name_for_progress, f"Instalando")
             self.config_manager.write_to_log(display_name_for_progress, f"Iniciando instalación: {item_path_or_name} (Tipo: {item_type}, Silencioso: {self.silent_mode}, Forzado: {self.force_mode})")
 
-            temp_log_path = None
+            temp_log_path = None # Se sigue usando temp_log_path para capturar stdout/stderr del proceso antes de agregarlo al log unificado.
             try:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".log", mode='w+', encoding='utf-8') as temp_log_file:
                     temp_log_path = Path(temp_log_file.name)
@@ -983,7 +1023,7 @@ class InstallerThread(QThread):
                 else:
                     raise ValueError(f"Tipo de instalación no reconocido: {item_type}")
 
-                self._register_successful_installation(display_name_for_progress)
+                self._register_successful_installation(display_name_for_progress, item_type, item_path_or_name) # MODIFICACIÓN 3: Pasar item_type y item_path_or_name
                 self.progress.emit(display_name_for_progress, f"Finalizado")
                 self.config_manager.write_to_log(display_name_for_progress, f"Instalación de {display_name_for_progress} completada exitosamente.")
 
@@ -1090,7 +1130,7 @@ class InstallerThread(QThread):
 
             retcode = self.current_process.returncode
 
-            # Escribir el log completo al archivo temporal
+            # Escribir el log completo al archivo temporal (esto es solo para debugging si se desea)
             with open(temp_log_path, 'w', encoding='utf-8') as f:
                 f.write(log_content)
 
@@ -1111,19 +1151,21 @@ class InstallerThread(QThread):
         except Exception as e:
             raise Exception(f"Error inesperado al ejecutar comando: {str(e)}")
 
-    def _register_successful_installation(self, display_name: str):
-        """Registra una instalación exitosa en el log del prefijo."""
+    def _register_successful_installation(self, display_name: str, item_type: str, original_path_or_name: str): # MODIFICACIÓN 3: Nuevos parámetros
+        """
+        MODIFICACIÓN 3: Registra una instalación exitosa en el log del prefijo (wineprotomanager.ini).
+        Añade más contexto al registro.
+        """
         prefix_path = Path(self.env["WINEPREFIX"])
-        log_file = prefix_path / "wineprotonmanager.log"
+        # MODIFICACIÓN 3: Cambiar a wineprotomanager.ini
+        log_file = prefix_path / "wineprotonmanager.ini"
         try:
+            # Usar un formato simple para el .ini
+            entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} installed {display_name} (Type: {item_type}, Source: {original_path_or_name})"
             with open(log_file, 'a', encoding='utf-8') as f:
-                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} installed {display_name}\n")
+                f.write(f"{entry}\n")
         except IOError as e:
             self.config_manager.write_to_log(display_name, f"Advertencia: No se pudo escribir en el log del prefijo {log_file}: {e}")
-
-    # [MODIFICACIÓN 1] Este método ya no se usará para detener la instalación,
-    # sino que se reportará el error y se continuará.
-    # Se ha trasladado la lógica de manejo de errores al bloque try-except en `run()`.
 
     def stop(self):
         """Detiene la instalación, incluyendo el proceso hijo."""
@@ -1141,75 +1183,87 @@ class InstallerThread(QThread):
 
 # --- Hilo de Backup ---
 class BackupThread(QThread):
-    progress_update = pyqtSignal(str) # Emite mensajes de progreso para la UI
-    finished = pyqtSignal(bool, str) # Emite (éxito, mensaje final)
+    progress_update = pyqtSignal(str)
+    finished = pyqtSignal(bool, str, str, str) # MODIFICACIÓN: Añadir config_name al finished signal
 
-    def __init__(self, source_path: Path, destination_path: Path, config_manager: ConfigManager):
+    def __init__(self, source_path: Path, destination_path: Path, config_manager: ConfigManager, is_full_backup: bool, config_name: str): # MODIFICACIÓN: Añadir config_name
         super().__init__()
         self.source_path = source_path
         self.destination_path = destination_path
         self.config_manager = config_manager
+        self.is_full_backup = is_full_backup
+        self.config_name = config_name # Guardar config_name
         self._is_running = True
         self._process: subprocess.Popen | None = None
 
     def run(self):
-        self.config_manager.write_to_backup_log(f"Iniciando backup de '{self.source_path}' a '{self.destination_path}'")
+        self.config_manager.write_to_backup_log(f"Iniciando backup de '{self.source_path}' a '{self.destination_path}' para '{self.config_name}'") # MODIFICACIÓN: Log más detallado
         try:
             if not self.source_path.exists() or not self.source_path.is_dir():
                 raise FileNotFoundError(f"La carpeta de origen del prefijo no existe: {self.source_path}")
 
-            self.destination_path.mkdir(parents=True, exist_ok=True) # Asegurar que el destino exista
-
-            # Usar rsync para el backup
             rsync_command = ["rsync", "-av", "--no-o", "--no-g"]
 
-            # Si el backup automático está deshabilitado, usar --checksum para incremental basado en contenido
-            if not self.config_manager.get_automatic_backup_enabled():
+            final_backup_path_str = "" # Inicializar aquí
+            if not self.is_full_backup: # Si es backup incremental (rsync)
                 rsync_command.append("--checksum")
-                self.config_manager.write_to_backup_log("Realizando backup incremental con --checksum.")
+                self.config_manager.write_to_backup_log("Realizando backup incremental con rsync --checksum.")
+                rsync_command.append(f"{self.source_path}/")
+                rsync_command.append(str(self.destination_path))
+                final_backup_path_str = str(self.destination_path) # El destino es el backup existente
             else:
                 self.config_manager.write_to_backup_log("Realizando backup completo (nueva carpeta con timestamp).")
+                temp_backup_dir = self.destination_path.parent / (self.destination_path.name + "_tmp")
+                temp_backup_dir.mkdir(parents=True, exist_ok=True)
 
-            rsync_command.append(f"{self.source_path}/") # La barra al final es crucial para copiar el contenido
-            rsync_command.append(str(self.destination_path))
+                rsync_command.append(f"{self.source_path}/")
+                rsync_command.append(str(temp_backup_dir))
+                final_backup_path_str = str(self.destination_path) # Este es el nombre final deseado
 
             self.progress_update.emit("Iniciando sincronización...")
             self.config_manager.write_to_backup_log(f"Comando rsync: {' '.join(rsync_command)}")
 
-            # Iniciar el proceso de rsync
             self._process = subprocess.Popen(rsync_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True, preexec_fn=os.setsid)
 
-            # Leer la salida en tiempo real
             while self._process.poll() is None and self._is_running:
                 line = self._process.stdout.readline()
                 if line:
                     self.progress_update.emit(line.strip())
                 else:
-                    QThread.msleep(50) # Pequeña pausa para no saturar
-                QApplication.processEvents() # Permitir que la UI se actualice
+                    QThread.msleep(50)
+                QApplication.processEvents()
 
-            stdout, stderr = self._process.communicate() # Leer el resto de la salida al finalizar
+            stdout, stderr = self._process.communicate()
 
             if not self._is_running:
-                self.finished.emit(False, "Backup cancelado por el usuario.")
+                self.finished.emit(False, "Backup cancelado por el usuario.", "", self.config_name) # MODIFICACIÓN: Añadir config_name
                 self.config_manager.write_to_backup_log("Backup cancelado por el usuario.")
+                if self.is_full_backup and temp_backup_dir.exists():
+                    shutil.rmtree(temp_backup_dir, ignore_errors=True)
             elif self._process.returncode == 0:
-                success_msg = f"Backup de '{self.source_path.name}' completado exitosamente a '{self.destination_path}'."
+                if self.is_full_backup:
+                    shutil.move(str(temp_backup_dir), str(Path(final_backup_path_str))) # Asegurarse de que Path() se usa correctamente
+                    self.config_manager.set_last_full_backup_path(self.config_name, final_backup_path_str) # MODIFICACIÓN: Guardar la ruta para esta config
+                    success_msg = f"Backup COMPLETO de '{self.source_path.name}' completado exitosamente a '{final_backup_path_str}'."
+                else:
+                    success_msg = f"Backup INCREMENTAL de '{self.source_path.name}' completado exitosamente a '{self.destination_path}'."
                 self.config_manager.write_to_backup_log(success_msg)
-                self.finished.emit(True, success_msg)
+                self.finished.emit(True, success_msg, final_backup_path_str, self.config_name) # MODIFICACIÓN: Añadir config_name
             else:
                 error_msg = f"Rsync falló con código {self._process.returncode}.\nStderr: {stderr}\nStdout: {stdout}"
                 self.config_manager.write_to_backup_log(f"ERROR: {error_msg}")
-                self.finished.emit(False, f"Error durante el backup: {stderr.strip() or stdout.strip()}")
+                if self.is_full_backup and temp_backup_dir.exists():
+                    shutil.rmtree(temp_backup_dir, ignore_errors=True)
+                self.finished.emit(False, f"Error durante el backup: {stderr.strip() or stdout.strip()}", "", self.config_name) # MODIFICACIÓN: Añadir config_name
 
         except FileNotFoundError as e:
             msg = f"Error: Comando rsync no encontrado o ruta de origen/destino inválida. Asegúrate de que rsync esté instalado. {e}"
             self.config_manager.write_to_backup_log(f"ERROR: {msg}")
-            self.finished.emit(False, msg)
+            self.finished.emit(False, msg, "", self.config_name) # MODIFICACIÓN: Añadir config_name
         except Exception as e:
             msg = f"Error inesperado durante el backup: {str(e)}"
             self.config_manager.write_to_backup_log(f"ERROR: {msg}")
-            self.finished.emit(False, msg)
+            self.finished.emit(False, msg, "", self.config_name) # MODIFICACIÓN: Añadir config_name
 
     def stop(self):
         """Detiene el hilo y el subproceso de backup."""
@@ -1227,7 +1281,6 @@ class InstallationProgressDialog(QDialog):
         self.setWindowTitle(f"Instalando: {item_name}")
         self.config_manager = config_manager
         self.item_name = item_name
-        # MODIFICACIÓN 1: Permitir que el diálogo no sea modal y se cierre sin detener el proceso
         self.setWindowModality(Qt.NonModal) # Cambiado a NonModal
         self.setMinimumSize(600, 400)
         self.setup_ui()
@@ -1265,8 +1318,6 @@ class InstallationProgressDialog(QDialog):
     def set_status(self, status_text: str):
         """Actualiza el texto de estado en el diálogo."""
         self.label.setText(f"Estado de la Instalación: <b>{status_text}</b>")
-        # El botón de cerrar ya no se habilita/deshabilita aquí, siempre está habilitado
-        # self.close_button.setEnabled(True) # Se elimina esta línea
 
     def closeEvent(self, event):
         """Permite el cierre del diálogo sin detener el hilo de instalación."""
@@ -1633,7 +1684,6 @@ class ConfigDialog(QDialog):
         versions_layout.addLayout(buttons_layout)
         self.group_proton_versions.setLayout(versions_layout)
         proton_inner_layout.addWidget(self.group_proton_versions) # Añadir al layout interno de proton_tab
-        # self.proton_tab.setLayout(proton_inner_layout) # Ya se asignó en el constructor del layout
 
         # Configuración de la pestaña Wine
         wine_inner_layout = QVBoxLayout(self.wine_tab) # Nuevo layout para el contenido de wine_tab
@@ -2113,8 +2163,7 @@ class ConfigDialog(QDialog):
         self.theme_combo.addItems(["Claro", "Oscuro"])
         current_theme = self.config_manager.get_theme()
         self.theme_combo.setCurrentText("Oscuro" if current_theme == "dark" else "Claro")
-        # [MODIFICACIÓN 3] Desconectado para que el tema solo cambie al reiniciar la app.
-        # self.theme_combo.currentTextChanged.connect(self._apply_theme_setting)
+
         install_options_layout.addRow("Tema de Interfaz:", self.theme_combo)
 
         silent_layout = QHBoxLayout()
@@ -2138,18 +2187,8 @@ class ConfigDialog(QDialog):
         install_options_group.setLayout(install_options_layout)
         main_layout.addWidget(install_options_group)
 
-        backup_options_group = QGroupBox("Opciones de Backup")
+        backup_options_group = QGroupBox("Opciones de Backup") # Todavía usamos el grupo para la última opción
         backup_options_layout = QFormLayout()
-
-        automatic_backup_layout = QHBoxLayout()
-        automatic_backup_label = QLabel("Crear nueva carpeta con timestamp para cada backup")
-        self.checkbox_automatic_backup = QCheckBox()
-        self.checkbox_automatic_backup.setToolTip("Si está activado, cada backup creará una nueva carpeta única con un timestamp. Si está desactivado, los backups se guardarán de forma incremental en la carpeta pfx o APPID")
-        self.checkbox_automatic_backup.setChecked(self.config_manager.get_automatic_backup_enabled())
-        automatic_backup_layout.addWidget(automatic_backup_label)
-        automatic_backup_layout.addStretch()
-        automatic_backup_layout.addWidget(self.checkbox_automatic_backup)
-        backup_options_layout.addRow(automatic_backup_layout)
 
         ask_for_backup_layout = QHBoxLayout()
         ask_for_backup_label = QLabel("Preguntar por backup antes de iniciar una herramienta/instalación")
@@ -2191,25 +2230,20 @@ class ConfigDialog(QDialog):
         Ahora solo actualiza la configuración en memoria. El cambio real se aplica al reiniciar la app."""
         theme_name = "dark" if text == "Oscuro" else "light"
         self.config_manager.set_theme(theme_name)
-        # self.config_manager.apply_breeze_style_to_widget(self) # Ya no se aplica inmediatamente globalmente
 
     def save_settings(self):
         """Guarda los ajustes generales de la aplicación."""
         try:
             winetricks_path_ok = self.config_manager.set_winetricks_path(self.edit_winetricks_path.text().strip())
 
-            # [MODIFICACIÓN 2] El tema ahora se actualiza aquí y se guarda en el archivo.
-            # La aplicación visualmente no cambia hasta el reinicio.
             theme = "dark" if self.theme_combo.currentText() == "Oscuro" else "light"
             self.config_manager.set_theme(theme) # Actualiza self.configs["settings"]["theme"]
             self.config_manager.save_configs() # Guarda la configuración actualizada en el archivo
 
             self.config_manager.set_silent_install(self.checkbox_silent_global.isChecked())
             self.config_manager.set_force_winetricks_install(self.checkbox_force_winetricks.isChecked())
-            self.config_manager.set_automatic_backup_enabled(self.checkbox_automatic_backup.isChecked())
             self.config_manager.set_ask_for_backup_before_action(self.checkbox_ask_for_backup_before_action.isChecked())
 
-            # MODIFICACIÓN 2: Mensaje informativo y reinicio de la aplicación
             QMessageBox.information(self, "Guardado", "Ajustes guardados exitosamente.\nLa aplicación se reiniciará para aplicar los cambios.")
             self.config_saved.emit() # Notificar a la ventana principal para que inicie el reinicio
             self.accept() # Cerrar el diálogo de configuración
@@ -2222,7 +2256,8 @@ class ConfigDialog(QDialog):
         dialog.setOption(QFileDialog.DontUseNativeDialog)
         dialog.setFileMode(QFileDialog.ExistingFile)
         dialog.setNameFilter("Ejecutables (*);;Todos los Archivos (*)")
-        dialog.setDirectory(str(Path.home()))
+        # MODIFICACIÓN 4: Usar la última ruta explorada para Winetricks
+        dialog.setDirectory(self.config_manager.get_last_browsed_dir("winetricks"))
         dialog.setFilter(QDir.AllEntries | QDir.AllDirs | QDir.NoDotAndDotDot) # Permitir directorios también
 
         self.config_manager.apply_breeze_style_to_widget(dialog) # Aplicar estilo al diálogo de archivo
@@ -2231,6 +2266,9 @@ class ConfigDialog(QDialog):
             selected = dialog.selectedFiles()
             if selected:
                 self.edit_winetricks_path.setText(selected[0])
+                # MODIFICACIÓN 4: Guardar la nueva ruta explorada
+                self.config_manager.set_last_browsed_dir("winetricks", str(Path(selected[0]).parent))
+
 
     def load_configs(self):
         """Carga y muestra las configuraciones guardadas."""
@@ -2390,36 +2428,43 @@ class ConfigDialog(QDialog):
 
     def browse_prefix(self):
         """Abre un diálogo para seleccionar el directorio de prefijo."""
-        path = self._get_directory_path("Seleccionar Directorio de Prefijo de Wine")
+        key = "wine_prefix" if self.config_type.currentText() == "Wine" else "proton_prefix"
+        path = self._get_directory_path("Seleccionar Directorio de Prefijo de Wine", key)
         if path:
             self.prefix_path.setText(path)
 
     def browse_wine(self):
         """Abre un diálogo para seleccionar el directorio de instalación de Wine."""
-        path = self._get_directory_path("Seleccionar Directorio de Instalación de Wine (ej., bin/wine)")
+        path = self._get_directory_path("Seleccionar Directorio de Instalación de Wine (ej., bin/wine)", "wine_install")
         if path:
             self.wine_directory.setText(path)
 
     def browse_proton(self):
         """Abre un diálogo para seleccionar el directorio de instalación de Proton."""
-        path = self._get_directory_path("Seleccionar Directorio de Instalación de Proton (ej., proton_dist/files)")
+        path = self._get_directory_path("Seleccionar Directorio de Instalación de Proton (ej., proton_dist/files)", "proton_install")
         if path:
             self.proton_directory.setText(path)
 
-    def _get_directory_path(self, title="Seleccionar Directorio") -> str | None:
-        """Helper para abrir un diálogo de selección de directorio."""
+    def _get_directory_path(self, title="Seleccionar Directorio", config_key: str = "default") -> str | None: # MODIFICACIÓN 4
+        """Helper para abrir un diálogo de selección de directorio.
+           MODIFICACIÓN 4: Ahora usa config_key para gestionar la última ruta explorada."""
         dialog = QFileDialog(self)
         dialog.setWindowTitle(title)
         dialog.setFileMode(QFileDialog.Directory)
         dialog.setOption(QFileDialog.ShowDirsOnly, True)
         dialog.setFilter(QDir.AllEntries | QDir.Hidden | QDir.NoDotAndDotDot)
-        dialog.setDirectory(str(Path.home()))
+        # MODIFICACIÓN 4: Usar la última ruta guardada
+        dialog.setDirectory(self.config_manager.get_last_browsed_dir(config_key))
 
         self.config_manager.apply_breeze_style_to_widget(dialog)
 
         if dialog.exec_() == QDialog.Accepted:
-            return dialog.selectedFiles()[0]
+            selected_path = dialog.selectedFiles()[0]
+            # MODIFICACIÓN 4: Guardar la nueva ruta explorada
+            self.config_manager.set_last_browsed_dir(config_key, selected_path)
+            return selected_path
         return None
+
 
     def test_configuration(self):
         """Prueba la configuración actual de Wine/Proton."""
@@ -2605,59 +2650,6 @@ class SelectGroupsDialog(QDialog):
         # Descripciones detalladas para componentes comunes de Winetricks
         self.component_descriptions = {
             "vb2run": "Runtime de Visual Basic 2.0 (Componente antiguo, para aplicaciones muy viejas).",
-            "vb3run": "Runtime de Visual Basic 3.0 (Componente antiguo, para aplicaciones muy viejas).",
-            "vb4run": "Runtime de Visual Basic 4.0 (Componente antiguo).",
-            "vb5run": "Runtime de Visual Basic 5.0 (Componente común para aplicaciones VB5).",
-            "vb6run": "Runtime de Visual Basic 6.0 (Muy común para aplicaciones VB6).",
-            "vcrun6": "Microsoft Visual C++ 6.0 Redistributable (Para programas antiguos que requieren este runtime).",
-            "vcrun6sp6": "Microsoft Visual C++ 6.0 SP6 Redistributable (Actualización para vcrun6).",
-            "vcrun2003": "Microsoft Visual C++ 2003 Redistributable.",
-            "vcrun2005": "Microsoft Visual C++ 2005 Redistributable (x86).",
-            "vcrun2008": "Microsoft Visual C++ 2008 Redistributable (x86).",
-            "vcrun2010": "Microsoft Visual C++ 2010 Redistributable (x86).",
-            "vcrun2012": "Microsoft Visual C++ 2012 Redistributable (x86/x64).",
-            "vcrun2013": "Microsoft Visual C++ 2013 Redistributable (x86/x64).",
-            "vcrun2015": "Microsoft Visual C++ 2015 Redistributable (Puede ser reemplazado por vcrun2017/2019/2022).",
-            "vcrun2017": "Microsoft Visual C++ 2017 Redistributable (x86/x64).",
-            "vcrun2019": "Microsoft Visual C++ 2019 Redistributable (x86/x64).",
-            "vcrun2022": "Microsoft Visual C++ 2022 Redistributable (x86/x64).",
-            "dotnet11": ".NET Framework 1.1 (Muy antiguo).",
-            "dotnet20": ".NET Framework 2.0 (Común para muchas aplicaciones antiguas).",
-            "dotnet30": ".NET Framework 3.0.",
-            "dotnet35": ".NET Framework 3.5 (Incluye 2.0 y 3.0).",
-            "dotnet40": ".NET Framework 4.0.",
-            "dotnet45": ".NET Framework 4.5.",
-            "dotnet46": ".NET Framework 4.6.",
-            "dotnet471": ".NET Framework 4.7.1.",
-            "dotnet48": ".NET Framework 4.8 (Última versión de .NET Framework para Windows 10/11).",
-            "d3dx9": "Colección de bibliotecas D3DX9 (Necesarias para muchos juegos DirectX 9).",
-            "directx9": "Microsoft DirectX 9.0c runtime (Componentes principales de DirectX 9).",
-            "xact": "DirectX Audio (XACT) runtime (Componentes de audio para DirectX).",
-            "allcodecs": "Instala un conjunto amplio de códecs multimedia comunes (fFDShow, LAV Filters, etc.).",
-            "lavfilters": "LAV Filters (Codecs de video/audio de alta calidad).",
-            "quicktime76": "QuickTime 7.6 (Para aplicaciones que usan QuickTime).",
-            "wmp11": "Windows Media Player 11 (Componentes del reproductor de Windows Media).",
-            "comctl32": "Microsoft Common Controls 32 (Bibliotecas de interfaz de usuario).",
-            "gdiplus": "Microsoft GDI+ (Librería de gráficos para Windows XP y anteriores).",
-            "msxml3": "Microsoft XML Core Services 3.0 (Componentes para procesar XML).",
-            "msxml4": "Microsoft XML Core Services 4.0.",
-            "msxml6": "Microsoft XML Core Services 6.0.",
-            "ole32": "OLE32 (Open Linking and Embedding, fundamental para muchas aplicaciones).",
-            "riched20": "RichEdit 2.0 (Control de edición de texto enriquecido).",
-            "riched30": "RichEdit 3.0 (Control de edición de texto enriquecido mejorado).",
-            "sapi": "Microsoft Speech API (Para reconocimiento de voz y síntesis).",
-            "shockwave": "Adobe Shockwave Player (Para contenido web interactivo antiguo).",
-            "ie6": "Internet Explorer 6 (Solo para compatibilidad específica, no recomendado).",
-            "ie7": "Internet Explorer 7 (Solo para compatibilidad específica).",
-            "ie8": "Internet Explorer 8 (Solo para compatibilidad específica).",
-            "openal": "OpenAL (Librería de audio 3D).",
-            "physx": "NVIDIA PhysX (Motor de física, a menudo requerido por juegos).",
-            "xna40": "Microsoft XNA Framework Redistributable 4.0 (Para juegos basados en XNA).",
-            "corefonts": "Microsoft TrueType core fonts (Fuentes básicas como Arial, Times New Roman, Courier New).",
-            "tahoma": "Fuente Tahoma (Una fuente de interfaz de usuario común).",
-            "verdana": "Fuente Verdana (Fuente diseñada para legibilidad en pantalla).",
-            "allfonts": "Instala una colección completa de fuentes de Windows.",
-            "wininet": "Wininet (Biblioteca de Internet para aplicaciones).",
             "xinput": "XInput (API para controladores de juegos modernos)."
         }
 
@@ -2782,7 +2774,8 @@ class CustomProgramDialog(QDialog):
 
     def browse_program(self):
         """Abre un diálogo para seleccionar el programa o script."""
-        default_dir = self.config_manager.programs_dir
+        # MODIFICACIÓN 4: Usar la última carpeta explorada para programas
+        default_dir = self.config_manager.get_last_browsed_dir("programs")
 
         dialog = QFileDialog(self)
         dialog.setOption(QFileDialog.DontUseNativeDialog) # Usar diálogo nativo de Qt para un control más consistente
@@ -2797,6 +2790,9 @@ class CustomProgramDialog(QDialog):
             selected_file = dialog.selectedFiles()
             if selected_file:
                 self.edit_path.setText(selected_file[0])
+                # MODIFICACIÓN 4: Guardar la nueva ruta explorada
+                self.config_manager.set_last_browsed_dir("programs", str(Path(selected_file[0]).parent))
+
 
     def get_program_info(self) -> dict:
         """Obtiene la información del programa ingresado."""
@@ -2925,11 +2921,7 @@ class ManageProgramsDialog(QDialog):
                     item_already_installed = True
             elif program_info["type"] == "wtr":
                 wtr_filename = Path(program_info["path"]).name
-                # Nota: Es posible que los scripts .wtr no se registren directamente por su nombre de archivo.
-                # Esta verificación podría ser menos precisa para .wtr a menos que el script
-                # registre un nombre específico. Para ser precisos, habría que parsear el .wtr
-                # para ver qué componente(s) de winetricks instala y verificar esos.
-                # Por simplicidad, se mantiene la lógica actual.
+
                 if wtr_filename in installed_items_in_prefix: # Esto asume que el nombre del script se registra.
                     item_already_installed = True
 
@@ -2938,7 +2930,7 @@ class ManageProgramsDialog(QDialog):
                                              f"El programa '{program_info['name']}' ya está registrado como instalado en este prefijo ({current_config_name}). ¿Deseas agregarlo a la lista de instalación de todos modos?",
                                              QMessageBox.Yes | QMessageBox.No)
                 if reply == QMessageBox.No:
-                    continue # No añadir si el usuario elige no hacerlo
+                    continue # No añadir if user chooses not to
 
             programs_to_add.append(program_info)
 
@@ -3264,25 +3256,17 @@ class InstallerApp(QWidget):
     def configure_environments(self):
         """Abre el diálogo para configurar entornos de Wine/Proton."""
         dialog = ConfigDialog(self.config_manager, self)
-        # MODIFICACIÓN 1: El diálogo de configuración necesita acceso al estado de instalación
-        # para deshabilitar "Guardar Ajustes" si hay una instalación en curso.
-        # Se actualiza el estado del botón cada vez que se muestra el diálogo.
         dialog.update_save_settings_button_state()
         dialog.config_saved.connect(self.handle_config_saved_and_restart) # Conectar a la nueva función de reinicio
         dialog.exec_()
         self.update_config_info() # Asegurarse de actualizar la info al cerrar el diálogo
 
-    # MODIFICACIÓN 2: Nueva función para manejar el guardado de configuración y reiniciar la app
     def handle_config_saved_and_restart(self):
         """
         Maneja la señal de que la configuración ha sido guardada.
         Cierra la aplicación actual y la reinicia.
         """
-        # Asegurarse de que el proceso se detache y la aplicación se reinicie limpiamente
-        # Se cierra la aplicación actual
         QApplication.quit()
-        # Se relanza la aplicación
-        # sys.argv[0] es la ruta al script actual
         QProcess.startDetached(sys.executable, sys.argv)
 
 
@@ -3362,11 +3346,14 @@ class InstallerApp(QWidget):
                     already_registered = True
                 elif program_info["type"] == "exe":
                     exe_filename = Path(program_info["path"]).name
+                    # La lógica de detección de EXE instalado es básica; podría mejorarse con hashes o nombres más robustos.
+                    # Aquí asume que si el nombre del ejecutable está en el .ini, ya está "instalado".
                     if exe_filename in installed_items:
                         already_registered = True
                 elif program_info["type"] == "wtr":
                     wtr_filename = Path(program_info["path"]).name
-                    if wtr_filename in installed_items:
+
+                    if wtr_filename in installed_items: # Esto asume que el nombre del script se registra.
                         already_registered = True
 
                 if already_registered:
@@ -3444,70 +3431,30 @@ class InstallerApp(QWidget):
             "Librerías de Visual Basic": ["vb2run", "vb3run", "vb4run", "vb5run", "vb6run"],
             "Librerías de Visual C++": [
                 "vcrun6", "vcrun6sp6", "vcrun2003", "vcrun2005", "vcrun2008",
-                "vcrun2010", "vcrun2012", "vcrun2013", "vcrun2015", "vcrun2017",
                 "vcrun2019", "vcrun2022"
             ],
             "Framework .NET": [
                 "dotnet11", "dotnet11sp1", "dotnet20", "dotnet20sp1", "dotnet20sp2",
-                "dotnet30", "dotnet30sp1", "dotnet35", "dotnet35sp1", "dotnet40",
-                "dotnet40_kb2468871", "dotnet45", "dotnet452", "dotnet46", "dotnet461",
-                "dotnet462", "dotnet471", "dotnet472", "dotnet48", # Versiones de Framework
-                # Añadir versiones de .NET Core/Desktop si se soportan en Winetricks
-                "dotnet6", "dotnet7", "dotnet8", "dotnet9", # solo si winetricks los soporta
-                "dotnetcore2", "dotnetcore3", "dotnetcoredesktop3",
-                "dotnetdesktop6", "dotnetdesktop7", "dotnetdesktop8", "dotnetdesktop9" # solo si winetricks los soporta
+                "dotnetdesktop6", "dotnetdesktop7", "dotnetdesktop8", "dotnetdesktop9"
             ],
             "DirectX y Multimedia": [
                 "d3dcompiler_42", "d3dcompiler_43", "d3dcompiler_46", "d3dcompiler_47",
-                "d3dx9", "d3dx9_24", "d3dx9_25", "d3dx9_26", "d3dx9_27", "d3dx9_28",
-                "d3dx9_29", "d3dx9_30", "d3dx9_31", "d3dx9_32", "d3dx9_33", "d3dx9_34",
-                "d3dx9_35", "d3dx9_36", "d3dx9_37", "d3dx9_38", "d3dx9_39", "d3dx9_40",
-                "d3dx9_41", "d3dx9_42", "d3dx9_43", "d3dx10", "d3dx10_43", "d3dx11_42",
-                "d3dx11_43", "d3dxof", "devenum", "dinput", "dinput8", "directmusic",
-                "directplay", "directshow", "directx9", "dmband", "dmcompos", "dmime",
-                "dmloader", "dmscript", "dmstyle", "dmsynth", "dmusic", "dmusic32",
-                "dx8vb", "dxdiag", "dxdiagn", "dxdiagn_feb2010", "dxtrans", "xact",
                 "xact_x64", "xaudio29", "xinput", "xna31", "xna40"
             ],
             "Códecs Multimedia": [
                 "allcodecs", "avifil32", "binkw32", "cinepak", "dirac", "ffdshow",
-                "icodecs", "l3codecx", "lavfilters", "lavfilters702", "ogg", "qasf",
-                "qcap", "qdvd", "qedit", "quartz", "quartz_feb2010", "quicktime72",
                 "quicktime76", "wmp9", "wmp10", "wmp11", "wmv9vcm", "xvid"
             ],
             "Componentes del Sistema": [
                 "amstream", "atmlib", "cabinet", "cmd", "comctl32", "comctl32ocx",
-                "comdlg32ocx", "crypt32", "crypt32_winxp", "dbghelp", "esent", "filever",
-                "gdiplus", "gdiplus_winxp", "glidewrapper", "glut", "gmdls", "hid",
-                "jet40", "mdac27", "mdac28", "msaa", "msacm32", "msasn1", "msctf",
-                "msdelta", "msdxmocx", "msflxgrd", "msftedit", "mshflxgd", "msls31",
-                "msmask", "mspatcha", "msscript", "msvcirt", "msvcrt40", "msxml3",
-                "msxml4", "msxml6", "ole32", "oleaut32", "pdh", "pdh_nt4", "peverify",
-                "pngfilt", "prntvpt", "python26", "python27", "riched20", "riched30",
-                "richtx32", "sapi", "sdl", "secur32", "setupapi", "shockwave",
-                "speechsdk", "tabctl32", "ucrtbase2019", "uiribbon", "updspapi",
-                "urlmon", "usp10", "webio", "windowscodes", "winhttp", "wininet",
                 "wininet_win2k", "wmi", "wsh57", "xmllite"
             ],
             "Controladores y Utilidades": [
                 "art2k7min", "art2kmin", "cnc_ddraw", "d2gl", "d3drm", "dpvoice",
-                "dsdmo", "dsound", "dswave", "faudio", # "faudio1901" - "faudio190607" (versiones específicas no en la lista original completa, se pueden añadir si es necesario)
-                "galliumnine", # "galliumnine02" - "galliumnine09" (versiones específicas)
-                "gfw", "ie6", "ie7", "ie8", "ie8_kb2936068",
-                "ie8_tls12", "iertutil", "itircl", "itss", "mdx", "mf", "mfc40",
-                "mfc42", "mfc70", "mfc71", "mfc80", "mfc90", "mfc100", "mfc110",
-                "mfc120", "mfc140", "nuget", "openal", "otvdm", "otvdm090",
                 "physx", "powershell", "powershell_core"
             ],
             "Fuentes": [
                 "allfonts", "andale", "arial", "baekmuk", "calibri", "cambria",
-                "candara", "cjkfonts", "comicsans", "consolas", "constantia",
-                "corbel", "corefonts", "courier", "droid", "eufonts", "fakechinese",
-                "fakejapanese", "fakejapanese_ipamona", "fakejapanese_vlgothic",
-                "fakekorean", "georgia", "impact", "ipamona", "liberation",
-                "lucida", "meiryo", "micross", "opensymbol", "pptfonts",
-                "sourcehansans", "tahoma", "takao", "times", "trebuchet",
-                "uff", "unifont", "verdana", "vlgothic", "webdings",
                 "wenquanyi", "wenquanyizenhei"
             ]
         }
@@ -3577,8 +3524,6 @@ class InstallerApp(QWidget):
 
                 if self.installation_progress_dialog:
                     self.installation_progress_dialog.set_status("Cancelado")
-                    # MODIFICACIÓN 1: El botón de cerrar siempre está habilitado en modo NonModal
-                    # self.installation_progress_dialog.close_button.setEnabled(True)
 
                 self.installation_finished() # Llamar al manejador de finalización para restablecer la UI
         else:
@@ -3710,8 +3655,6 @@ class InstallerApp(QWidget):
         # MODIFICACIÓN 1: El botón de cancelar siempre está habilitado si la instalación está en curso
         self.btn_cancel.setEnabled(is_installer_running)
 
-        # Botones de gestión de ítems y otras acciones
-        # MODIFICACIÓN 1: Deshabilita los botones que modifican la lista de instalación (no los de herramientas de prefijo)
         can_modify_list = not is_installer_running and not is_backup_running
         self.btn_select_components.setEnabled(can_modify_list)
         self.btn_add_custom.setEnabled(can_modify_list)
@@ -3720,12 +3663,7 @@ class InstallerApp(QWidget):
         self.btn_delete_selection.setEnabled(can_modify_list)
         self.btn_move_up.setEnabled(can_modify_list)
         self.btn_move_down.setEnabled(can_modify_list)
-        # El botón de backup manual ahora se controla con la variable can_use_prefix_tools
-        # self.backup_prefix_button.setEnabled(not is_installer_running and not is_backup_running) # Esta línea se quita
 
-        # Habilitar/deshabilitar herramientas del prefijo (MODIFICACIÓN 1: Ahora habilitados durante instalación)
-        # Los botones de herramientas del prefijo se habilitan siempre que no haya un backup en curso,
-        # ya que las instalaciones pueden tomar mucho tiempo y no necesariamente bloquean estas herramientas.
         can_use_prefix_tools = not is_backup_running
         self.btn_shell.setEnabled(can_use_prefix_tools)
         self.btn_prefix_folder.setEnabled(can_use_prefix_tools)
@@ -3733,14 +3671,6 @@ class InstallerApp(QWidget):
         self.btn_winecfg.setEnabled(can_use_prefix_tools)
         self.btn_explorer.setEnabled(can_use_prefix_tools)
         self.backup_prefix_button.setEnabled(can_use_prefix_tools) # Incluir el botón de backup aquí también
-
-        # MODIFICACIÓN 1: Deshabilitar el botón "Guardar Ajustes" del diálogo de configuración si está abierto
-        # Esto requiere una referencia al diálogo de configuración, si está activo.
-        # Una forma de hacerlo es que ConfigDialog llame de vuelta a la app principal para consultar el estado.
-        # Por ahora, se asume que ConfigDialog actualizará su propio botón al mostrarse.
-        # Sin embargo, si el usuario abre ConfigDialog *después* de que una instalación haya comenzado,
-        # ConfigDialog necesitará una forma de saber el estado actual.
-        # Una señal o un getter en InstallerApp serían necesarios.
 
     def start_installation(self):
         """Inicia el proceso de instalación de los elementos seleccionados."""
@@ -3754,8 +3684,6 @@ class InstallerApp(QWidget):
             QMessageBox.warning(self, "Advertencia", "No se seleccionaron elementos para instalar. Marca los elementos que deseas instalar.")
             return
 
-        # Restablecer el estado de los elementos seleccionados a "Pendiente" en la UI y el modelo interno
-        # Esto es importante si se reintenta una instalación después de un error/cancelación
         for row in range(self.items_table.rowCount()):
             item_data = self.items_for_installation[row]
             checkbox_item = self.items_table.item(row, 0)
@@ -3789,8 +3717,6 @@ class InstallerApp(QWidget):
             QMessageBox.critical(self, "Error", "No se ha seleccionado ninguna configuración de Wine/Proton o es inválida.")
             return
 
-        # Filtrar solo los elementos que están marcados como "Pendiente"
-        # Esto asegura que solo los elementos realmente seleccionados y no omitidos se envíen al hilo
         items_to_process_data_for_thread = [
             (item_data['path'], item_data['type'], item_data['name'])
             for item_data in self.items_for_installation
@@ -3827,8 +3753,6 @@ class InstallerApp(QWidget):
         # Mostrar diálogo de progreso de instalación
         first_item_name_for_dialog = items_to_process_data_for_thread[0][2] if items_to_process_data_for_thread else "elementos"
         self.installation_progress_dialog = InstallationProgressDialog(first_item_name_for_dialog, self.config_manager, self)
-        # MODIFICACIÓN 1: El diálogo no es modal y se puede cerrar, la instalación continúa
-        # self.installation_progress_dialog.show() # Usar show() en lugar de exec_()
 
         # Iniciar el hilo de instalación
         self.installer_thread = InstallerThread(
@@ -3871,7 +3795,6 @@ class InstallerApp(QWidget):
         # MODIFICACIÓN 1: Mostrar el diálogo de progreso después de configurar todo, no bloquear la UI principal
         self.installation_progress_dialog.show()
         self.installer_thread.start()
-
 
     def _create_prefix(self, config: dict, config_name: str, prefix_path: Path):
         """Crea un nuevo prefijo de Wine/Proton y lo inicializa con wineboot."""
@@ -3943,8 +3866,6 @@ class InstallerApp(QWidget):
                 found_in_model = True
                 break
 
-        # if not found_in_model: print(f"DEBUG: Elemento '{name}' no encontrado en la lista interna para actualización de estado.")
-
         if self.installation_progress_dialog and self.installation_progress_dialog.isVisible():
             # Actualizar el label principal del diálogo de progreso
             self.installation_progress_dialog.set_status(f"Instalando {name}: {status}")
@@ -3992,9 +3913,6 @@ class InstallerApp(QWidget):
 
         if self.installation_progress_dialog:
             self.installation_progress_dialog.set_status("Cancelado")
-            # MODIFICACIÓN 1: El botón de cerrar siempre está habilitado en modo NonModal
-            # self.installation_progress_dialog.close_button.setEnabled(True)
-
 
     def installation_finished(self):
         """
@@ -4048,8 +3966,6 @@ class InstallerApp(QWidget):
 
         if self.installation_progress_dialog:
             self.installation_progress_dialog.set_status("Finalizado")
-            # MODIFICACIÓN 1: El botón de cerrar siempre está habilitado en modo NonModal
-            # self.installation_progress_dialog.close_button.setEnabled(True)
 
         QMessageBox.information(
             self,
@@ -4067,8 +3983,6 @@ class InstallerApp(QWidget):
         if self.installation_progress_dialog:
             self.installation_progress_dialog.append_log(f"ERROR FATAL: {message}")
             self.installation_progress_dialog.set_status("Error Crítico")
-            # MODIFICACIÓN 1: El botón de cerrar siempre está habilitado en modo NonModal
-            # self.installation_progress_dialog.close_button.setEnabled(True)
 
         QMessageBox.critical(self, "Error Crítico de Instalación", message + "\nLa instalación se ha detenido.")
         self.update_installation_button_state() # Restablecer botones
@@ -4086,34 +4000,37 @@ class InstallerApp(QWidget):
 
         self.installer_thread = None # Asegurarse de limpiar la referencia al hilo
 
-
     def show_item_installation_error(self, item_name: str, error_message: str):
         """[MODIFICACIÓN 1] Maneja errores de ítems individuales (la instalación continúa)."""
         if self.installation_progress_dialog:
             self.installation_progress_dialog.append_log(f"ERROR para '{item_name}': {error_message}")
             # El diálogo de progreso principal seguirá mostrando "Instalando [siguiente item]"
 
-        # No se muestra un QMessageBox aquí para evitar interrupciones durante la instalación continua.
-        # El usuario verá el estado "Error" en la tabla y los detalles en el log del diálogo de progreso.
-
-    def _get_backup_destination_path(self, current_config_name: str, source_to_backup: Path) -> Path:
+    def _get_backup_destination_path(self, current_config_name: str, source_to_backup: Path, is_full_backup: bool) -> Path | None:
         """
         Determina la ruta de destino correcta para el backup.
-        Si el backup automático está activado, creará una subcarpeta con timestamp.
+        Si is_full_backup es True, creará una subcarpeta con timestamp.
+        Si es incremental, intentará usar la ruta del último backup completo para *esa* configuración.
         """
         base_backup_path_for_config = self.config_manager.backup_dir / current_config_name
         base_backup_path_for_config.mkdir(parents=True, exist_ok=True)
 
-        if self.config_manager.get_automatic_backup_enabled():
+        if is_full_backup:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             # El destino final incluye el nombre de la carpeta a copiar (source_to_backup.name)
             return base_backup_path_for_config / f"{source_to_backup.name}_backup_{timestamp}"
         else:
-            # Los backups incrementales se guardan directamente dentro de la carpeta de la config
-            return base_backup_path_for_config / source_to_backup.name
+            # Para backup incremental, el destino es la última ruta de backup completo guardada para *esta* configuración.
+            last_full_backup_path_str = self.config_manager.get_last_full_backup_path(current_config_name) # MODIFICACIÓN: Pasar config_name
+            if last_full_backup_path_str and Path(last_full_backup_path_str).is_dir():
+                return Path(last_full_backup_path_str)
+            return None # Indicar que no hay un backup completo previo para incremental para esta configuración
 
     def perform_backup(self):
-        """Inicia el proceso de backup para el prefijo actual."""
+        """
+        Inicia el proceso de backup para el prefijo actual.
+        Presenta un diálogo con opciones para backup Rsync (Incremental) o Backup Completo (Nuevo con timestamp).
+        """
         current_config_name = self.config_manager.configs.get("last_used")
         config = self.config_manager.get_config(current_config_name)
 
@@ -4123,49 +4040,50 @@ class InstallerApp(QWidget):
 
         source_prefix_path = Path(config["prefix"])
         if config.get("steam_appid"):
-            # Si es un prefijo de Steam, se hace backup de toda la carpeta compatdata
             steam_compat_data_root = Path.home() / ".local/share/Steam/steamapps/compatdata"
             source_to_backup = steam_compat_data_root / config["steam_appid"]
         else:
-            # Si es un prefijo personalizado, se hace backup solo del prefijo
             source_to_backup = source_prefix_path
 
         if not source_to_backup.exists():
             QMessageBox.warning(self, "Prefijo no existe", f"El directorio de origen para backup '{source_to_backup}' no existe.")
             return
 
-        destination_path = self._get_backup_destination_path(current_config_name, source_to_backup)
-
         msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Confirmar Backup")
-        msg_box.setText(f"¿Deseas realizar un backup del prefijo '{source_to_backup.name}' de la configuración '{current_config_name}' a:\n'{destination_path}'?")
+        msg_box.setWindowTitle("Opciones de Backup")
+        msg_box.setText(f"¿Qué tipo de backup deseas realizar para el prefijo '{source_to_backup.name}' de la configuración '{current_config_name}'?")
         msg_box.setIcon(QMessageBox.Question)
 
-        yes_button = msg_box.addButton("Sí", QMessageBox.YesRole)
-        no_button = msg_box.addButton("No", QMessageBox.NoRole)
-        msg_box.setDefaultButton(yes_button)
+        btn_rsync = msg_box.addButton("Rsync (Incremental)", QMessageBox.ActionRole)
+        btn_full_backup = msg_box.addButton("Backup Completo (Nuevo)", QMessageBox.ActionRole)
+        btn_cancel = msg_box.addButton("Cancelar", QMessageBox.RejectRole)
+
+        msg_box.setDefaultButton(btn_rsync)
         self.config_manager.apply_breeze_style_to_widget(msg_box)
 
-        msg_box.exec_() # Mostrar el diálogo modal
+        msg_box.exec_()
 
-        if msg_box.clickedButton() == yes_button:
-            self.backup_progress_dialog = QProgressDialog("Preparando backup...", "", 0, 100, self)
-            self.backup_progress_dialog.setWindowTitle("Progreso del Backup")
-            self.backup_progress_dialog.setWindowModality(Qt.WindowModal)
-            self.backup_progress_dialog.setCancelButton(None) # Backup no cancelable por UI
-            self.backup_progress_dialog.setRange(0, 0) # Rango indeterminado para rsync
-            self.backup_progress_dialog.setFixedSize(450, 150)
-            self.config_manager.apply_breeze_style_to_widget(self.backup_progress_dialog)
-            self.backup_progress_dialog.show()
+        clicked_button = msg_box.clickedButton()
 
-            self.backup_thread = BackupThread(source_to_backup, destination_path, self.config_manager)
-            self.backup_thread.progress_update.connect(self.update_backup_progress_dialog)
-            self.backup_thread.finished.connect(self.on_manual_backup_finished)
-            self.backup_thread.start()
-            self.update_installation_button_state() # Deshabilitar otros botones
+        if clicked_button == btn_rsync:
+            destination_path = self._get_backup_destination_path(current_config_name, source_to_backup, is_full_backup=False)
+            if not destination_path or not destination_path.is_dir():
+                QMessageBox.warning(self, "No hay Backup Completo Previo",
+                                    "No se encontró un backup completo previo para realizar un backup incremental para esta configuración. "
+                                    "Por favor, realiza un 'Backup Completo (Nuevo)' primero.")
+                return
+            self._start_backup_process(source_to_backup, destination_path, is_full_backup=False, config_name=current_config_name, prompt_callback=None) # MODIFICACIÓN: Pasar config_name
+        elif clicked_button == btn_full_backup:
+            destination_path = self._get_backup_destination_path(current_config_name, source_to_backup, is_full_backup=True)
+            self._start_backup_process(source_to_backup, destination_path, is_full_backup=True, config_name=current_config_name, prompt_callback=None) # MODIFICACIÓN: Pasar config_name
+        elif clicked_button == btn_cancel:
+            QMessageBox.information(self, "Backup Cancelado", "La operación de backup ha sido cancelada.")
 
     def prompt_for_backup(self, callback_func):
-        """Muestra un diálogo preguntando si se desea hacer un backup antes de una acción."""
+        """
+        Muestra un diálogo preguntando si se desea hacer un backup antes de una acción.
+        Ahora ofrece las mismas opciones (Rsync/Completo) que el backup manual, sin "Cancelar Acción".
+        """
         current_config_name = self.config_manager.configs.get("last_used")
         config = self.config_manager.get_config(current_config_name)
 
@@ -4184,56 +4102,82 @@ class InstallerApp(QWidget):
             callback_func() # Prefijo no existe, continuar sin backup
             return
 
-        destination_path = self._get_backup_destination_path(current_config_name, source_to_backup)
-
         msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Realizar Backup")
-        msg_box.setText(f"¿Deseas realizar un backup del prefijo '{source_to_backup.name}' de la configuración '{current_config_name}' antes de continuar con la operación?")
+        msg_box.setWindowTitle("Realizar Backup Antes de Continuar")
+        msg_box.setText(f"Se recomienda realizar un backup del prefijo '{source_to_backup.name}' de la configuración '{current_config_name}' antes de continuar con la operación.")
 
-        yes_button = msg_box.addButton("Sí", QMessageBox.YesRole)
-        no_button = msg_box.addButton("No", QMessageBox.NoRole)
-        msg_box.setDefaultButton(yes_button)
+        btn_rsync = msg_box.addButton("Rsync (Incremental)", QMessageBox.YesRole)
+        btn_full_backup = msg_box.addButton("Backup Completo (Nuevo)", QMessageBox.YesRole)
+        btn_no_backup = msg_box.addButton("No hacer Backup y Continuar", QMessageBox.NoRole)
+
+        msg_box.setDefaultButton(btn_rsync)
         self.config_manager.apply_breeze_style_to_widget(msg_box)
 
         msg_box.exec_()
 
-        if msg_box.clickedButton() == yes_button:
-            self.backup_progress_dialog = QProgressDialog("Preparando backup...", "", 0, 100, self)
-            self.backup_progress_dialog.setWindowTitle("Progreso del Backup")
-            self.backup_progress_dialog.setWindowModality(Qt.WindowModal)
-            self.backup_progress_dialog.setCancelButton(None)
-            self.backup_progress_dialog.setRange(0, 0)
-            self.backup_progress_dialog.setFixedSize(450, 150)
-            self.config_manager.apply_breeze_style_to_widget(self.backup_progress_dialog)
-            self.backup_progress_dialog.show()
+        clicked_button = msg_box.clickedButton()
 
-            self.backup_thread = BackupThread(source_to_backup, destination_path, self.config_manager)
-            self.backup_thread.progress_update.connect(self.update_backup_progress_dialog)
-            # El callback se ejecuta después de que el backup termina (exitoso o fallido)
-            self.backup_thread.finished.connect(lambda success, msg: self.on_prompted_backup_finished(success, msg, callback_func))
-            self.backup_thread.start()
-            self.update_installation_button_state() # Deshabilitar botones mientras se hace el backup
-        elif msg_box.clickedButton() == no_button:
-            callback_func() # Continuar con la operación original si el usuario no quiere backup
+        if clicked_button == btn_rsync:
+            destination_path = self._get_backup_destination_path(current_config_name, source_to_backup, is_full_backup=False)
+            if not destination_path or not destination_path.is_dir():
+                QMessageBox.warning(self, "No hay Backup Completo Previo",
+                                    "No se encontró un backup completo previo para realizar un backup incremental para esta configuración. "
+                                    "Por favor, realiza un 'Backup Completo (Nuevo)' primero o selecciona 'No hacer Backup y Continuar'.")
+                callback_func() # Continuar con la acción original si el rsync no es posible
+                return
+            self._start_backup_process(source_to_backup, destination_path, is_full_backup=False, config_name=current_config_name, prompt_callback=callback_func) # MODIFICACIÓN: Pasar config_name
+        elif clicked_button == btn_full_backup:
+            destination_path = self._get_backup_destination_path(current_config_name, source_to_backup, is_full_backup=True)
+            self._start_backup_process(source_to_backup, destination_path, is_full_backup=True, config_name=current_config_name, prompt_callback=callback_func) # MODIFICACIÓN: Pasar config_name
+        elif clicked_button == btn_no_backup:
+            callback_func() # Continuar con la operación original sin backup
 
-    def on_prompted_backup_finished(self, success: bool, message: str, callback_func):
+    def _start_backup_process(self, source_to_backup: Path, destination_path: Path, is_full_backup: bool, config_name: str, prompt_callback=None): # MODIFICACIÓN: Añadir config_name
+        """Método auxiliar para iniciar el hilo de backup."""
+        self.backup_progress_dialog = QProgressDialog("Preparando backup...", "", 0, 100, self)
+        self.backup_progress_dialog.setWindowTitle("Progreso del Backup")
+        self.backup_progress_dialog.setWindowModality(Qt.WindowModal)
+        self.backup_progress_dialog.setCancelButton(None)
+        self.backup_progress_dialog.setRange(0, 0)
+        self.backup_progress_dialog.setFixedSize(450, 150)
+        self.config_manager.apply_breeze_style_to_widget(self.backup_progress_dialog)
+        self.backup_progress_dialog.show()
+
+        self.backup_thread = BackupThread(source_to_backup, destination_path, self.config_manager, is_full_backup, config_name) # MODIFICACIÓN: Pasar config_name
+        self.backup_thread.progress_update.connect(self.update_backup_progress_dialog)
+        if prompt_callback:
+            # MODIFICACIÓN: Ajustar el lambda para recibir el nuevo parámetro config_name
+            self.backup_thread.finished.connect(lambda success, msg, path, current_conf_name: self.on_prompted_backup_finished(success, msg, path, current_conf_name, prompt_callback))
+        else:
+            # MODIFICACIÓN: Ajustar el lambda para recibir el nuevo parámetro config_name
+            self.backup_thread.finished.connect(lambda success, msg, path, current_conf_name: self.on_manual_backup_finished(success, msg, path, current_conf_name))
+        self.backup_thread.start()
+        self.update_installation_button_state()
+
+    def on_prompted_backup_finished(self, success: bool, message: str, final_backup_path: str, config_name: str, callback_func): # MODIFICACIÓN: Añadir config_name
         """Callback para backups iniciados por un prompt."""
         self.backup_progress_dialog.close()
-        self.backup_thread = None # Liberar el hilo
-        self.update_installation_button_state() # Restablecer el estado de los botones
+        self.backup_thread = None
+        self.update_installation_button_state()
 
         if success:
             QMessageBox.information(self, "Backup Completo", message)
-            callback_func() # Ejecutar la función original
+            callback_func()
         else:
-            QMessageBox.critical(self, "Error de Backup", message + "\nLa operación original no se continuará.")
+            reply = QMessageBox.question(self, "Backup Fallido",
+                                         f"{message}\n\n¿Deseas continuar con la operación original a pesar de que el backup falló?",
+                                         QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                callback_func()
+            else:
+                QMessageBox.information(self, "Operación Cancelada", "La operación ha sido cancelada debido a un error en el backup.")
 
     def update_backup_progress_dialog(self, message: str):
         """Actualiza el progreso del diálogo de backup."""
         self.backup_progress_dialog.setLabelText(f"Backup en progreso...\n{message}")
         QApplication.processEvents()
 
-    def on_manual_backup_finished(self, success: bool, message: str):
+    def on_manual_backup_finished(self, success: bool, message: str, final_backup_path: str, config_name: str): # MODIFICACIÓN: Añadir config_name
         """Callback para backups iniciados por el botón manual."""
         self.backup_progress_dialog.close()
         self.backup_thread = None
@@ -4252,9 +4196,6 @@ class InstallerApp(QWidget):
 
     def _continue_open_winetricks(self):
         """Abre la GUI de Winetricks para el prefijo actual."""
-        # Esta función ya está dentro del _continue_open_winetricks
-        # del prompt, así que no necesitamos una doble llamada al prompt
-        # en esta función. Simplemente ejecuta.
         try:
             current_config_name = self.config_manager.configs["last_used"]
             env = self.config_manager.get_current_environment(current_config_name)
@@ -4370,23 +4311,13 @@ if __name__ == "__main__":
             QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
         if hasattr(Qt, 'AA_UseHighDpiPixmaps'):
             QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-
+            
         app = QApplication(sys.argv)
         app.setStyle("Fusion") # Fusion es un buen estilo base para temas personalizados
-
-        # PASO CRÍTICO: Instanciar ConfigManager PRIMERO
-        # Y pasar una referencia a la aplicación (app) para que ConfigManager pueda interactuar con ella si es necesario,
-        # aunque en este caso la referencia a 'app_instance' en ConfigManager no se usa para consultar el estado de los hilos de InstallerApp.
-        # En su lugar, el InstallerApp se encargará de pasar su propia referencia a ConfigManager.
         config_manager = ConfigManager(None) # Temporalmente sin app_instance, se asignará más tarde.
 
         # Luego, instanciar InstallerApp con el config_manager ya creado
         installer = InstallerApp(config_manager)
-
-        # Ahora que installer tiene una referencia válida, se actualiza la referencia interna en config_manager
-        # (Aunque en este código en particular, la referencia app_instance en ConfigManager no es estrictamente usada
-        # para la lógica de los botones en ConfigDialog. La ConfigDialog ya consulta directamente a InstallerApp.
-        # Pero es una buena práctica asegurar la bidireccionalidad si fuera necesaria.)
         config_manager.app_instance = installer
 
         # Ajustar tamaño de la ventana al tamaño guardado o por defecto, y limitarlo a la pantalla disponible

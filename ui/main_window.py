@@ -1,6 +1,7 @@
 import sys
 import subprocess
 import time
+import shutil
 from pathlib import Path
 from functools import partial
 
@@ -19,7 +20,7 @@ from PyQt5.QtGui import QIcon, QPalette, QColor, QFont, QDesktopServices
 from config_manager import ConfigManager
 from installer_thread import InstallerThread, BackupThread
 from downloader import DownloadThread, DecompressionThread, VersionSearchThread
-from styles import STYLE_BREEZE, COLOR_BREEZE_PRIMARY, apply_breeze_style_to_widget
+from styles import STYLE_BREEZE, COLOR_BREEZE_PRIMARY
 from dialogs import ConfigDialog, CustomProgramDialog, ManageProgramsDialog, SelectGroupsDialog
 
 class InstallationProgressDialog(QDialog):
@@ -28,7 +29,6 @@ class InstallationProgressDialog(QDialog):
         self.setWindowTitle(f"Instalando: {item_name}")
         self.config_manager = config_manager
         self.item_name = item_name
-        # MODIFICACIÓN 1: Permitir que el diálogo no sea modal y se cierre sin detener el proceso
         self.setWindowModality(Qt.NonModal) # Cambiado a NonModal
         self.setMinimumSize(600, 400)
         self.setup_ui()
@@ -66,8 +66,6 @@ class InstallationProgressDialog(QDialog):
     def set_status(self, status_text: str):
         """Actualiza el texto de estado en el diálogo."""
         self.label.setText(f"Estado de la Instalación: <b>{status_text}</b>")
-        # El botón de cerrar ya no se habilita/deshabilita aquí, siempre está habilitado
-        # self.close_button.setEnabled(True) # Se elimina esta línea
 
     def closeEvent(self, event):
         """Permite el cierre del diálogo sin detener el hilo de instalación."""
@@ -361,25 +359,17 @@ class InstallerApp(QWidget):
     def configure_environments(self):
         """Abre el diálogo para configurar entornos de Wine/Proton."""
         dialog = ConfigDialog(self.config_manager, self)
-        # MODIFICACIÓN 1: El diálogo de configuración necesita acceso al estado de instalación
-        # para deshabilitar "Guardar Ajustes" si hay una instalación en curso.
-        # Se actualiza el estado del botón cada vez que se muestra el diálogo.
         dialog.update_save_settings_button_state()
         dialog.config_saved.connect(self.handle_config_saved_and_restart) # Conectar a la nueva función de reinicio
         dialog.exec_()
         self.update_config_info() # Asegurarse de actualizar la info al cerrar el diálogo
 
-    # MODIFICACIÓN 2: Nueva función para manejar el guardado de configuración y reiniciar la app
     def handle_config_saved_and_restart(self):
         """
         Maneja la señal de que la configuración ha sido guardada.
         Cierra la aplicación actual y la reinicia.
         """
-        # Asegurarse de que el proceso se detache y la aplicación se reinicie limpiamente
-        # Se cierra la aplicación actual
         QApplication.quit()
-        # Se relanza la aplicación
-        # sys.argv[0] es la ruta al script actual
         QProcess.startDetached(sys.executable, sys.argv)
 
 
@@ -459,11 +449,14 @@ class InstallerApp(QWidget):
                     already_registered = True
                 elif program_info["type"] == "exe":
                     exe_filename = Path(program_info["path"]).name
+                    # La lógica de detección de EXE instalado es básica; podría mejorarse con hashes o nombres más robustos.
+                    # Aquí asume que si el nombre del ejecutable está en el .ini, ya está "instalado".
                     if exe_filename in installed_items:
                         already_registered = True
                 elif program_info["type"] == "wtr":
                     wtr_filename = Path(program_info["path"]).name
-                    if wtr_filename in installed_items:
+
+                    if wtr_filename in installed_items: # Esto asume que el nombre del script se registra.
                         already_registered = True
 
                 if already_registered:
@@ -674,8 +667,6 @@ class InstallerApp(QWidget):
 
                 if self.installation_progress_dialog:
                     self.installation_progress_dialog.set_status("Cancelado")
-                    # MODIFICACIÓN 1: El botón de cerrar siempre está habilitado en modo NonModal
-                    # self.installation_progress_dialog.close_button.setEnabled(True)
 
                 self.installation_finished() # Llamar al manejador de finalización para restablecer la UI
         else:
@@ -807,8 +798,6 @@ class InstallerApp(QWidget):
         # MODIFICACIÓN 1: El botón de cancelar siempre está habilitado si la instalación está en curso
         self.btn_cancel.setEnabled(is_installer_running)
 
-        # Botones de gestión de ítems y otras acciones
-        # MODIFICACIÓN 1: Deshabilita los botones que modifican la lista de instalación (no los de herramientas de prefijo)
         can_modify_list = not is_installer_running and not is_backup_running
         self.btn_select_components.setEnabled(can_modify_list)
         self.btn_add_custom.setEnabled(can_modify_list)
@@ -817,12 +806,7 @@ class InstallerApp(QWidget):
         self.btn_delete_selection.setEnabled(can_modify_list)
         self.btn_move_up.setEnabled(can_modify_list)
         self.btn_move_down.setEnabled(can_modify_list)
-        # El botón de backup manual ahora se controla con la variable can_use_prefix_tools
-        # self.backup_prefix_button.setEnabled(not is_installer_running and not is_backup_running) # Esta línea se quita
 
-        # Habilitar/deshabilitar herramientas del prefijo (MODIFICACIÓN 1: Ahora habilitados durante instalación)
-        # Los botones de herramientas del prefijo se habilitan siempre que no haya un backup en curso,
-        # ya que las instalaciones pueden tomar mucho tiempo y no necesariamente bloquean estas herramientas.
         can_use_prefix_tools = not is_backup_running
         self.btn_shell.setEnabled(can_use_prefix_tools)
         self.btn_prefix_folder.setEnabled(can_use_prefix_tools)
@@ -830,14 +814,6 @@ class InstallerApp(QWidget):
         self.btn_winecfg.setEnabled(can_use_prefix_tools)
         self.btn_explorer.setEnabled(can_use_prefix_tools)
         self.backup_prefix_button.setEnabled(can_use_prefix_tools) # Incluir el botón de backup aquí también
-
-        # MODIFICACIÓN 1: Deshabilitar el botón "Guardar Ajustes" del diálogo de configuración si está abierto
-        # Esto requiere una referencia al diálogo de configuración, si está activo.
-        # Una forma de hacerlo es que ConfigDialog llame de vuelta a la app principal para consultar el estado.
-        # Por ahora, se asume que ConfigDialog actualizará su propio botón al mostrarse.
-        # Sin embargo, si el usuario abre ConfigDialog *después* de que una instalación haya comenzado,
-        # ConfigDialog necesitará una forma de saber el estado actual.
-        # Una señal o un getter en InstallerApp serían necesarios.
 
     def start_installation(self):
         """Inicia el proceso de instalación de los elementos seleccionados."""
@@ -851,8 +827,6 @@ class InstallerApp(QWidget):
             QMessageBox.warning(self, "Advertencia", "No se seleccionaron elementos para instalar. Marca los elementos que deseas instalar.")
             return
 
-        # Restablecer el estado de los elementos seleccionados a "Pendiente" en la UI y el modelo interno
-        # Esto es importante si se reintenta una instalación después de un error/cancelación
         for row in range(self.items_table.rowCount()):
             item_data = self.items_for_installation[row]
             checkbox_item = self.items_table.item(row, 0)
@@ -886,8 +860,6 @@ class InstallerApp(QWidget):
             QMessageBox.critical(self, "Error", "No se ha seleccionado ninguna configuración de Wine/Proton o es inválida.")
             return
 
-        # Filtrar solo los elementos que están marcados como "Pendiente"
-        # Esto asegura que solo los elementos realmente seleccionados y no omitidos se envíen al hilo
         items_to_process_data_for_thread = [
             (item_data['path'], item_data['type'], item_data['name'])
             for item_data in self.items_for_installation
@@ -924,8 +896,6 @@ class InstallerApp(QWidget):
         # Mostrar diálogo de progreso de instalación
         first_item_name_for_dialog = items_to_process_data_for_thread[0][2] if items_to_process_data_for_thread else "elementos"
         self.installation_progress_dialog = InstallationProgressDialog(first_item_name_for_dialog, self.config_manager, self)
-        # MODIFICACIÓN 1: El diálogo no es modal y se puede cerrar, la instalación continúa
-        # self.installation_progress_dialog.show() # Usar show() en lugar de exec_()
 
         # Iniciar el hilo de instalación
         self.installer_thread = InstallerThread(
@@ -968,7 +938,6 @@ class InstallerApp(QWidget):
         # MODIFICACIÓN 1: Mostrar el diálogo de progreso después de configurar todo, no bloquear la UI principal
         self.installation_progress_dialog.show()
         self.installer_thread.start()
-
 
     def _create_prefix(self, config: dict, config_name: str, prefix_path: Path):
         """Crea un nuevo prefijo de Wine/Proton y lo inicializa con wineboot."""
@@ -1040,8 +1009,6 @@ class InstallerApp(QWidget):
                 found_in_model = True
                 break
 
-        # if not found_in_model: print(f"DEBUG: Elemento '{name}' no encontrado en la lista interna para actualización de estado.")
-
         if self.installation_progress_dialog and self.installation_progress_dialog.isVisible():
             # Actualizar el label principal del diálogo de progreso
             self.installation_progress_dialog.set_status(f"Instalando {name}: {status}")
@@ -1089,9 +1056,6 @@ class InstallerApp(QWidget):
 
         if self.installation_progress_dialog:
             self.installation_progress_dialog.set_status("Cancelado")
-            # MODIFICACIÓN 1: El botón de cerrar siempre está habilitado en modo NonModal
-            # self.installation_progress_dialog.close_button.setEnabled(True)
-
 
     def installation_finished(self):
         """
@@ -1145,8 +1109,6 @@ class InstallerApp(QWidget):
 
         if self.installation_progress_dialog:
             self.installation_progress_dialog.set_status("Finalizado")
-            # MODIFICACIÓN 1: El botón de cerrar siempre está habilitado en modo NonModal
-            # self.installation_progress_dialog.close_button.setEnabled(True)
 
         QMessageBox.information(
             self,
@@ -1164,8 +1126,6 @@ class InstallerApp(QWidget):
         if self.installation_progress_dialog:
             self.installation_progress_dialog.append_log(f"ERROR FATAL: {message}")
             self.installation_progress_dialog.set_status("Error Crítico")
-            # MODIFICACIÓN 1: El botón de cerrar siempre está habilitado en modo NonModal
-            # self.installation_progress_dialog.close_button.setEnabled(True)
 
         QMessageBox.critical(self, "Error Crítico de Instalación", message + "\nLa instalación se ha detenido.")
         self.update_installation_button_state() # Restablecer botones
@@ -1183,34 +1143,37 @@ class InstallerApp(QWidget):
 
         self.installer_thread = None # Asegurarse de limpiar la referencia al hilo
 
-
     def show_item_installation_error(self, item_name: str, error_message: str):
         """[MODIFICACIÓN 1] Maneja errores de ítems individuales (la instalación continúa)."""
         if self.installation_progress_dialog:
             self.installation_progress_dialog.append_log(f"ERROR para '{item_name}': {error_message}")
             # El diálogo de progreso principal seguirá mostrando "Instalando [siguiente item]"
 
-        # No se muestra un QMessageBox aquí para evitar interrupciones durante la instalación continua.
-        # El usuario verá el estado "Error" en la tabla y los detalles en el log del diálogo de progreso.
-
-    def _get_backup_destination_path(self, current_config_name: str, source_to_backup: Path) -> Path:
+    def _get_backup_destination_path(self, current_config_name: str, source_to_backup: Path, is_full_backup: bool) -> Path | None:
         """
         Determina la ruta de destino correcta para el backup.
-        Si el backup automático está activado, creará una subcarpeta con timestamp.
+        Si is_full_backup es True, creará una subcarpeta con timestamp.
+        Si es incremental, intentará usar la ruta del último backup completo para *esa* configuración.
         """
         base_backup_path_for_config = self.config_manager.backup_dir / current_config_name
         base_backup_path_for_config.mkdir(parents=True, exist_ok=True)
 
-        if self.config_manager.get_automatic_backup_enabled():
+        if is_full_backup:
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             # El destino final incluye el nombre de la carpeta a copiar (source_to_backup.name)
             return base_backup_path_for_config / f"{source_to_backup.name}_backup_{timestamp}"
         else:
-            # Los backups incrementales se guardan directamente dentro de la carpeta de la config
-            return base_backup_path_for_config / source_to_backup.name
+            # Para backup incremental, el destino es la última ruta de backup completo guardada para *esta* configuración.
+            last_full_backup_path_str = self.config_manager.get_last_full_backup_path(current_config_name) # MODIFICACIÓN: Pasar config_name
+            if last_full_backup_path_str and Path(last_full_backup_path_str).is_dir():
+                return Path(last_full_backup_path_str)
+            return None # Indicar que no hay un backup completo previo para incremental para esta configuración
 
     def perform_backup(self):
-        """Inicia el proceso de backup para el prefijo actual."""
+        """
+        Inicia el proceso de backup para el prefijo actual.
+        Presenta un diálogo con opciones para backup Rsync (Incremental) o Backup Completo (Nuevo con timestamp).
+        """
         current_config_name = self.config_manager.configs.get("last_used")
         config = self.config_manager.get_config(current_config_name)
 
@@ -1220,49 +1183,50 @@ class InstallerApp(QWidget):
 
         source_prefix_path = Path(config["prefix"])
         if config.get("steam_appid"):
-            # Si es un prefijo de Steam, se hace backup de toda la carpeta compatdata
             steam_compat_data_root = Path.home() / ".local/share/Steam/steamapps/compatdata"
             source_to_backup = steam_compat_data_root / config["steam_appid"]
         else:
-            # Si es un prefijo personalizado, se hace backup solo del prefijo
             source_to_backup = source_prefix_path
 
         if not source_to_backup.exists():
             QMessageBox.warning(self, "Prefijo no existe", f"El directorio de origen para backup '{source_to_backup}' no existe.")
             return
 
-        destination_path = self._get_backup_destination_path(current_config_name, source_to_backup)
-
         msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Confirmar Backup")
-        msg_box.setText(f"¿Deseas realizar un backup del prefijo '{source_to_backup.name}' de la configuración '{current_config_name}' a:\n'{destination_path}'?")
+        msg_box.setWindowTitle("Opciones de Backup")
+        msg_box.setText(f"¿Qué tipo de backup deseas realizar para el prefijo '{source_to_backup.name}' de la configuración '{current_config_name}'?")
         msg_box.setIcon(QMessageBox.Question)
 
-        yes_button = msg_box.addButton("Sí", QMessageBox.YesRole)
-        no_button = msg_box.addButton("No", QMessageBox.NoRole)
-        msg_box.setDefaultButton(yes_button)
+        btn_rsync = msg_box.addButton("Rsync (Incremental)", QMessageBox.ActionRole)
+        btn_full_backup = msg_box.addButton("Backup Completo (Nuevo)", QMessageBox.ActionRole)
+        btn_cancel = msg_box.addButton("Cancelar", QMessageBox.RejectRole)
+
+        msg_box.setDefaultButton(btn_rsync)
         self.config_manager.apply_breeze_style_to_widget(msg_box)
 
-        msg_box.exec_() # Mostrar el diálogo modal
+        msg_box.exec_()
 
-        if msg_box.clickedButton() == yes_button:
-            self.backup_progress_dialog = QProgressDialog("Preparando backup...", "", 0, 100, self)
-            self.backup_progress_dialog.setWindowTitle("Progreso del Backup")
-            self.backup_progress_dialog.setWindowModality(Qt.WindowModal)
-            self.backup_progress_dialog.setCancelButton(None) # Backup no cancelable por UI
-            self.backup_progress_dialog.setRange(0, 0) # Rango indeterminado para rsync
-            self.backup_progress_dialog.setFixedSize(450, 150)
-            self.config_manager.apply_breeze_style_to_widget(self.backup_progress_dialog)
-            self.backup_progress_dialog.show()
+        clicked_button = msg_box.clickedButton()
 
-            self.backup_thread = BackupThread(source_to_backup, destination_path, self.config_manager)
-            self.backup_thread.progress_update.connect(self.update_backup_progress_dialog)
-            self.backup_thread.finished.connect(self.on_manual_backup_finished)
-            self.backup_thread.start()
-            self.update_installation_button_state() # Deshabilitar otros botones
+        if clicked_button == btn_rsync:
+            destination_path = self._get_backup_destination_path(current_config_name, source_to_backup, is_full_backup=False)
+            if not destination_path or not destination_path.is_dir():
+                QMessageBox.warning(self, "No hay Backup Completo Previo",
+                                    "No se encontró un backup completo previo para realizar un backup incremental para esta configuración. "
+                                    "Por favor, realiza un 'Backup Completo (Nuevo)' primero.")
+                return
+            self._start_backup_process(source_to_backup, destination_path, is_full_backup=False, config_name=current_config_name, prompt_callback=None) # MODIFICACIÓN: Pasar config_name
+        elif clicked_button == btn_full_backup:
+            destination_path = self._get_backup_destination_path(current_config_name, source_to_backup, is_full_backup=True)
+            self._start_backup_process(source_to_backup, destination_path, is_full_backup=True, config_name=current_config_name, prompt_callback=None) # MODIFICACIÓN: Pasar config_name
+        elif clicked_button == btn_cancel:
+            QMessageBox.information(self, "Backup Cancelado", "La operación de backup ha sido cancelada.")
 
     def prompt_for_backup(self, callback_func):
-        """Muestra un diálogo preguntando si se desea hacer un backup antes de una acción."""
+        """
+        Muestra un diálogo preguntando si se desea hacer un backup antes de una acción.
+        Ahora ofrece las mismas opciones (Rsync/Completo) que el backup manual, sin "Cancelar Acción".
+        """
         current_config_name = self.config_manager.configs.get("last_used")
         config = self.config_manager.get_config(current_config_name)
 
@@ -1281,56 +1245,82 @@ class InstallerApp(QWidget):
             callback_func() # Prefijo no existe, continuar sin backup
             return
 
-        destination_path = self._get_backup_destination_path(current_config_name, source_to_backup)
-
         msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Realizar Backup")
-        msg_box.setText(f"¿Deseas realizar un backup del prefijo '{source_to_backup.name}' de la configuración '{current_config_name}' antes de continuar con la operación?")
+        msg_box.setWindowTitle("Realizar Backup Antes de Continuar")
+        msg_box.setText(f"Se recomienda realizar un backup del prefijo '{source_to_backup.name}' de la configuración '{current_config_name}' antes de continuar con la operación.")
 
-        yes_button = msg_box.addButton("Sí", QMessageBox.YesRole)
-        no_button = msg_box.addButton("No", QMessageBox.NoRole)
-        msg_box.setDefaultButton(yes_button)
+        btn_rsync = msg_box.addButton("Rsync (Incremental)", QMessageBox.YesRole)
+        btn_full_backup = msg_box.addButton("Backup Completo (Nuevo)", QMessageBox.YesRole)
+        btn_no_backup = msg_box.addButton("No hacer Backup y Continuar", QMessageBox.NoRole)
+
+        msg_box.setDefaultButton(btn_rsync)
         self.config_manager.apply_breeze_style_to_widget(msg_box)
 
         msg_box.exec_()
 
-        if msg_box.clickedButton() == yes_button:
-            self.backup_progress_dialog = QProgressDialog("Preparando backup...", "", 0, 100, self)
-            self.backup_progress_dialog.setWindowTitle("Progreso del Backup")
-            self.backup_progress_dialog.setWindowModality(Qt.WindowModal)
-            self.backup_progress_dialog.setCancelButton(None)
-            self.backup_progress_dialog.setRange(0, 0)
-            self.backup_progress_dialog.setFixedSize(450, 150)
-            self.config_manager.apply_breeze_style_to_widget(self.backup_progress_dialog)
-            self.backup_progress_dialog.show()
+        clicked_button = msg_box.clickedButton()
 
-            self.backup_thread = BackupThread(source_to_backup, destination_path, self.config_manager)
-            self.backup_thread.progress_update.connect(self.update_backup_progress_dialog)
-            # El callback se ejecuta después de que el backup termina (exitoso o fallido)
-            self.backup_thread.finished.connect(lambda success, msg: self.on_prompted_backup_finished(success, msg, callback_func))
-            self.backup_thread.start()
-            self.update_installation_button_state() # Deshabilitar botones mientras se hace el backup
-        elif msg_box.clickedButton() == no_button:
-            callback_func() # Continuar con la operación original si el usuario no quiere backup
+        if clicked_button == btn_rsync:
+            destination_path = self._get_backup_destination_path(current_config_name, source_to_backup, is_full_backup=False)
+            if not destination_path or not destination_path.is_dir():
+                QMessageBox.warning(self, "No hay Backup Completo Previo",
+                                    "No se encontró un backup completo previo para realizar un backup incremental para esta configuración. "
+                                    "Por favor, realiza un 'Backup Completo (Nuevo)' primero o selecciona 'No hacer Backup y Continuar'.")
+                callback_func() # Continuar con la acción original si el rsync no es posible
+                return
+            self._start_backup_process(source_to_backup, destination_path, is_full_backup=False, config_name=current_config_name, prompt_callback=callback_func) # MODIFICACIÓN: Pasar config_name
+        elif clicked_button == btn_full_backup:
+            destination_path = self._get_backup_destination_path(current_config_name, source_to_backup, is_full_backup=True)
+            self._start_backup_process(source_to_backup, destination_path, is_full_backup=True, config_name=current_config_name, prompt_callback=callback_func) # MODIFICACIÓN: Pasar config_name
+        elif clicked_button == btn_no_backup:
+            callback_func() # Continuar con la operación original sin backup
 
-    def on_prompted_backup_finished(self, success: bool, message: str, callback_func):
+    def _start_backup_process(self, source_to_backup: Path, destination_path: Path, is_full_backup: bool, config_name: str, prompt_callback=None): # MODIFICACIÓN: Añadir config_name
+        """Método auxiliar para iniciar el hilo de backup."""
+        self.backup_progress_dialog = QProgressDialog("Preparando backup...", "", 0, 100, self)
+        self.backup_progress_dialog.setWindowTitle("Progreso del Backup")
+        self.backup_progress_dialog.setWindowModality(Qt.WindowModal)
+        self.backup_progress_dialog.setCancelButton(None)
+        self.backup_progress_dialog.setRange(0, 0)
+        self.backup_progress_dialog.setFixedSize(450, 150)
+        self.config_manager.apply_breeze_style_to_widget(self.backup_progress_dialog)
+        self.backup_progress_dialog.show()
+
+        self.backup_thread = BackupThread(source_to_backup, destination_path, self.config_manager, is_full_backup, config_name) # MODIFICACIÓN: Pasar config_name
+        self.backup_thread.progress_update.connect(self.update_backup_progress_dialog)
+        if prompt_callback:
+            # MODIFICACIÓN: Ajustar el lambda para recibir el nuevo parámetro config_name
+            self.backup_thread.finished.connect(lambda success, msg, path, current_conf_name: self.on_prompted_backup_finished(success, msg, path, current_conf_name, prompt_callback))
+        else:
+            # MODIFICACIÓN: Ajustar el lambda para recibir el nuevo parámetro config_name
+            self.backup_thread.finished.connect(lambda success, msg, path, current_conf_name: self.on_manual_backup_finished(success, msg, path, current_conf_name))
+        self.backup_thread.start()
+        self.update_installation_button_state()
+
+    def on_prompted_backup_finished(self, success: bool, message: str, final_backup_path: str, config_name: str, callback_func): # MODIFICACIÓN: Añadir config_name
         """Callback para backups iniciados por un prompt."""
         self.backup_progress_dialog.close()
-        self.backup_thread = None # Liberar el hilo
-        self.update_installation_button_state() # Restablecer el estado de los botones
+        self.backup_thread = None
+        self.update_installation_button_state()
 
         if success:
             QMessageBox.information(self, "Backup Completo", message)
-            callback_func() # Ejecutar la función original
+            callback_func()
         else:
-            QMessageBox.critical(self, "Error de Backup", message + "\nLa operación original no se continuará.")
+            reply = QMessageBox.question(self, "Backup Fallido",
+                                         f"{message}\n\n¿Deseas continuar con la operación original a pesar de que el backup falló?",
+                                         QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                callback_func()
+            else:
+                QMessageBox.information(self, "Operación Cancelada", "La operación ha sido cancelada debido a un error en el backup.")
 
     def update_backup_progress_dialog(self, message: str):
         """Actualiza el progreso del diálogo de backup."""
         self.backup_progress_dialog.setLabelText(f"Backup en progreso...\n{message}")
         QApplication.processEvents()
 
-    def on_manual_backup_finished(self, success: bool, message: str):
+    def on_manual_backup_finished(self, success: bool, message: str, final_backup_path: str, config_name: str): # MODIFICACIÓN: Añadir config_name
         """Callback para backups iniciados por el botón manual."""
         self.backup_progress_dialog.close()
         self.backup_thread = None
@@ -1349,9 +1339,6 @@ class InstallerApp(QWidget):
 
     def _continue_open_winetricks(self):
         """Abre la GUI de Winetricks para el prefijo actual."""
-        # Esta función ya está dentro del _continue_open_winetricks
-        # del prompt, así que no necesitamos una doble llamada al prompt
-        # en esta función. Simplemente ejecuta.
         try:
             current_config_name = self.config_manager.configs["last_used"]
             env = self.config_manager.get_current_environment(current_config_name)

@@ -4,15 +4,23 @@ import subprocess
 import json
 import re
 import time
+import shutil
 from pathlib import Path
 
-from PyQt5.QtGui import QColor, QPalette
-from PyQt5.QtWidgets import QApplication, QMessageBox, QWidget
-from PyQt5.QtCore import QSize
-
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QListWidget, QLabel, QCheckBox, QDialog, QDialogButtonBox,
+    QMessageBox, QGroupBox, QComboBox, QLineEdit, QFileDialog,
+    QTabWidget, QFormLayout, QScrollArea, QListWidgetItem,
+    QTableWidget, QTableWidgetItem, QHeaderView,
+    QTreeWidget, QTreeWidgetItem, QProgressDialog, QProgressBar,
+    QInputDialog, QRadioButton, QSizePolicy
+)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QSize, QUrl, QTimer, QProcess
+from PyQt5.QtGui import QIcon, QPalette, QColor, QFont, QDesktopServices
 
 # Importar estilos para aplicar
-from styles import STYLE_BREEZE, COLOR_BREEZE_PRIMARY, apply_breeze_style_to_widget
+from styles import STYLE_BREEZE, COLOR_BREEZE_PRIMARY, COLOR_BREEZE_ACCENT
 
 class ConfigManager:
     """
@@ -27,6 +35,7 @@ class ConfigManager:
 
         self.log_dir = self.config_dir / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.installation_log_file = self.log_dir / "installation.log"
 
         self.wine_download_dir = self.config_dir / "Wine"
         self.proton_download_dir = self.config_dir / "Proton"
@@ -37,6 +46,15 @@ class ConfigManager:
 
         self.backup_dir = self.config_dir / "Backup"
         self.backup_dir.mkdir(exist_ok=True)
+
+        self.last_browsed_dirs = {
+            "wine_prefix": str(self.wine_download_dir),
+            "proton_prefix": str(self.proton_download_dir),
+            "wine_install": str(self.wine_download_dir),
+            "proton_install": str(self.proton_download_dir),
+            "programs": str(self.programs_dir),
+            "winetricks": str(Path.home())
+        }
 
         self.configs = self._load_configs()
         self._ensure_default_config()
@@ -50,8 +68,9 @@ class ConfigManager:
             "window_size": [900, 650],
             "silent_install": True,
             "force_winetricks_install": False,
-            "automatic_backup_enabled": False,
-            "ask_for_backup_before_action": True
+            "ask_for_backup_before_action": True,
+            "last_browsed_dirs": self.last_browsed_dirs,
+            "last_full_backup_path": {} # MODIFICACIÓN: Cambiado a un diccionario para almacenar por configuración
         }
 
         default_repositories = {
@@ -70,7 +89,24 @@ class ConfigManager:
         self.configs.setdefault("custom_programs", [])
 
         for key, value in default_settings.items():
-            self.configs["settings"].setdefault(key, value)
+            # Si 'last_full_backup_path' existe pero no es un diccionario (e.g. era una cadena de texto de una versión anterior)
+            # lo convertimos a un diccionario vacío para evitar errores.
+            if key == "last_full_backup_path" and not isinstance(self.configs["settings"].get(key), dict):
+                self.configs["settings"][key] = {}
+            else:
+                self.configs["settings"].setdefault(key, value)
+
+
+        if "last_browsed_dirs" not in self.configs["settings"]:
+            self.configs["settings"]["last_browsed_dirs"] = self.last_browsed_dirs
+        else:
+            for key, default_path in self.last_browsed_dirs.items():
+                self.configs["settings"]["last_browsed_dirs"].setdefault(key, default_path)
+            self.last_browsed_dirs = self.configs["settings"]["last_browsed_dirs"]
+
+        # MODIFICACIÓN: Ya no se necesita esta línea si 'last_full_backup_path' se inicializa como {}
+        # if "last_full_backup_path" not in self.configs["settings"]:
+        #    self.configs["settings"]["last_full_backup_path"] = ""
 
         if "Wine-System" not in self.configs["configs"]:
             self.configs["configs"]["Wine-System"] = {
@@ -88,7 +124,10 @@ class ConfigManager:
 
         try:
             with open(self.config_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                loaded_configs = json.load(f)
+                if "settings" in loaded_configs and "last_browsed_dirs" in loaded_configs["settings"]:
+                    self.last_browsed_dirs = loaded_configs["settings"]["last_browsed_dirs"]
+                return loaded_configs
         except (json.JSONDecodeError, IOError) as e:
             print(f"Error cargando el archivo de configuración {self.config_file}: {e}. Se usará la configuración por defecto.")
             return {}
@@ -96,6 +135,7 @@ class ConfigManager:
     def save_configs(self):
         """Guarda las configuraciones en el archivo JSON con manejo de errores."""
         try:
+            self.configs["settings"]["last_browsed_dirs"] = self.last_browsed_dirs
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.configs, f, indent=4, ensure_ascii=False)
         except IOError as e:
@@ -214,8 +254,6 @@ class ConfigManager:
         NOTA: Para que el cambio de tema se aplique globalmente, la aplicación debe reiniciarse.
         """
         self.configs.setdefault("settings", {})["theme"] = theme
-        # El guardado se hará solo cuando el usuario haga clic en "Guardar Ajustes" en el diálogo de configuración
-        # self.save_configs() # [MODIFICACIÓN 3] Comentado para evitar el guardado inmediato.
 
     def get_theme(self) -> str:
         """Obtiene el tema actual. Por defecto es 'dark'."""
@@ -270,15 +308,6 @@ class ConfigManager:
         """Obtiene si la instalación forzada de Winetricks está habilitada. Por defecto es False."""
         return self.configs.get("settings", {}).get("force_winetricks_install", False)
 
-    def set_automatic_backup_enabled(self, enabled: bool):
-        """Establece si el backup automático está habilitado y guarda la configuración."""
-        self.configs.setdefault("settings", {})["automatic_backup_enabled"] = enabled
-        self.save_configs()
-
-    def get_automatic_backup_enabled(self) -> bool:
-        """Obtiene si el backup automático está habilitado. Por defecto es False."""
-        return self.configs.get("settings", {}).get("automatic_backup_enabled", False)
-
     def set_ask_for_backup_before_action(self, enabled: bool):
         """Establece si se pregunta por backup antes de una acción y guarda la configuración."""
         self.configs.setdefault("settings", {})["ask_for_backup_before_action"] = enabled
@@ -287,6 +316,18 @@ class ConfigManager:
     def get_ask_for_backup_before_action(self) -> bool:
         """Obtiene si se pregunta por backup antes de una acción. Por defecto es True."""
         return self.configs.get("settings", {}).get("ask_for_backup_before_action", True)
+
+    def set_last_full_backup_path(self, config_name: str, path: str):
+        """Guarda la ruta del último backup completo exitoso para una configuración específica."""
+        # Asegurarse de que el diccionario 'last_full_backup_path' exista en settings
+        self.configs.setdefault("settings", {}).setdefault("last_full_backup_path", {})
+        self.configs["settings"]["last_full_backup_path"][config_name] = path
+        self.save_configs()
+
+    def get_last_full_backup_path(self, config_name: str) -> str:
+        """Obtiene la ruta del último backup completo exitoso para una configuración específica."""
+        # Acceder al diccionario y devolver la ruta para el config_name dado, o una cadena vacía si no existe.
+        return self.configs.get("settings", {}).get("last_full_backup_path", {}).get(config_name, "")
 
     def delete_config(self, config_name: str) -> bool:
         """Elimina una configuración guardada, ajustando 'last_used' si es necesario."""
@@ -299,18 +340,22 @@ class ConfigManager:
         return False
 
     def get_installed_winetricks(self, prefix_path: str) -> list[str]:
-        """Obtiene la lista de componentes de winetricks instalados en un prefijo."""
-        wineprotonmanager_log = Path(prefix_path) / "wineprotonmanager.log"
+        """
+        Obtiene la lista de componentes de winetricks instalados en un prefijo
+        desde el archivo wineprotomanager.ini.
+        """
+        wineprotonmanager_ini = Path(prefix_path) / "wineprotonmanager.ini"
         installed = set()
-        if wineprotonmanager_log.exists():
+        if wineprotonmanager_ini.exists():
             try:
-                with open(wineprotonmanager_log, 'r', encoding='utf-8', errors='ignore') as f:
+                with open(wineprotonmanager_ini, 'r', encoding='utf-8', errors='ignore') as f:
                     for line in f:
                         match = re.search(r"installed\s+(\S+)", line)
                         if match:
                             installed.add(match.group(1))
+
             except Exception as e:
-                print(f"Error leyendo el registro de winetricks: {e}")
+                print(f"Error leyendo el archivo wineprotomanager.ini: {e}")
         return list(installed)
 
     def save_window_size(self, size: QSize):
@@ -323,28 +368,24 @@ class ConfigManager:
         size = self.configs.get("settings", {}).get("window_size", [900, 650])
         return QSize(size[0], size[1])
 
-    def get_log_path(self, program_name: str) -> Path:
-        """Obtiene la ruta al archivo de registro para un programa específico."""
-        current_config_name = self.configs.get("last_used", "default")
-        log_sub_dir = self.log_dir / current_config_name
-        log_sub_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = re.sub(r'[^\w\-_.]', '_', program_name)
-        return log_sub_dir / f"{safe_name}.log"
+    def get_log_path(self) -> Path:
+        """Obtiene la ruta al archivo de registro unificado para la instalación."""
+        return self.installation_log_file
 
     def write_to_log(self, program_name: str, message: str):
-        """Escribe un mensaje con marca de tiempo en el registro del programa."""
-        log_path = self.get_log_path(program_name)
+        """Escribe un mensaje con marca de tiempo en el registro de instalación unificado."""
+        log_path = self.get_log_path()
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         try:
             with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(f"[{timestamp}] {message}\n")
+                f.write(f"[{timestamp}] [{program_name}] {message}\n")
         except IOError as e:
             print(f"Error escribiendo en el log {log_path}: {e}")
 
     def get_backup_log_path(self) -> Path:
         """Obtiene la ruta al archivo de registro de backup."""
         current_config_name = self.configs.get("last_used", "default")
-        log_sub_dir = self.log_dir / current_config_name
+        log_sub_dir = self.log_dir / current_config_name # Todavía se mantiene un subdirectorio para logs de backup
         log_sub_dir.mkdir(parents=True, exist_ok=True)
         return log_sub_dir / "backup.log"
 
@@ -389,6 +430,90 @@ class ConfigManager:
                 return True
         return False
 
+    def get_last_browsed_dir(self, key: str) -> str:
+        """Obtiene la última carpeta explorada para una clave específica."""
+        return self.last_browsed_dirs.get(key, str(Path.home()))
+
+    def set_last_browsed_dir(self, key: str, path: str):
+        """Establece la última carpeta explorada para una clave específica."""
+        if Path(path).is_dir():
+            self.last_browsed_dirs[key] = path
+            self.save_configs() # Guardar inmediatamente para persistencia
+
     def apply_breeze_style_to_widget(self, widget: QWidget):
         """Aplica el estilo Breeze a un widget y sus hijos de forma recursiva."""
-        apply_breeze_style_to_widget(widget, self)
+
+        theme = self.get_theme()
+        style_settings = STYLE_BREEZE
+
+        # Aplicar paleta principal
+        palette = QPalette()
+        current_palette_colors = style_settings["dark_palette"] if theme == "dark" else style_settings["light_palette"]
+
+        palette.setColor(QPalette.Window, current_palette_colors["window"])
+        palette.setColor(QPalette.WindowText, current_palette_colors["window_text"])
+        palette.setColor(QPalette.Base, current_palette_colors["base"])
+        palette.setColor(QPalette.Text, current_palette_colors["text"])
+        palette.setColor(QPalette.Button, current_palette_colors["button"])
+        palette.setColor(QPalette.ButtonText, current_palette_colors["button_text"])
+        palette.setColor(QPalette.Highlight, current_palette_colors["highlight"])
+        palette.setColor(QPalette.HighlightedText, current_palette_colors["highlight_text"])
+        palette.setColor(QPalette.ToolTipBase, current_palette_colors["base"])
+        palette.setColor(QPalette.ToolTipText, current_palette_colors["text"])
+
+        widget.setPalette(palette)
+        widget.setFont(style_settings["font"])
+
+        # Aplicar estilos CSS específicos a los hijos
+        for child_widget in widget.findChildren(QWidget):
+            if isinstance(child_widget, QApplication) or (isinstance(child_widget, QWidget) and not isinstance(child_widget, (QPushButton, QTableWidget, QGroupBox, QListWidget, QTreeWidget, QLineEdit, QComboBox, QCheckBox, QRadioButton))):
+                continue
+
+            child_widget.setFont(style_settings["font"])
+
+            if isinstance(child_widget, QPushButton):
+                child_widget.setStyleSheet(style_settings["dark_button_style"] if theme == "dark" else style_settings["button_style"])
+            elif isinstance(child_widget, QTableWidget):
+                child_widget.setStyleSheet(style_settings["dark_table_style"] if theme == "dark" else style_settings["table_style"])
+            elif isinstance(child_widget, QGroupBox):
+                child_widget.setStyleSheet(style_settings["dark_groupbox_style"] if theme == "dark" else style_settings["groupbox_style"])
+                child_widget.setFont(style_settings["title_font"])
+            elif isinstance(child_widget, (QListWidget, QTreeWidget)):
+                list_tree_bg = style_settings["dark_palette"]["base"] if theme == "dark" else style_settings["light_palette"]["base"]
+                list_tree_text = style_settings["dark_palette"]["text"] if theme == "dark" else style_settings["light_palette"]["text"]
+                list_tree_border = style_settings["dark_border"] if theme == "dark" else style_settings["light_border"]
+                list_tree_highlight = style_settings["dark_palette"]["highlight"] if theme == "dark" else style_settings["light_palette"]["highlight"]
+                list_tree_highlight_text = style_settings["dark_palette"]["highlight_text"] if theme == "dark" else style_settings["light_palette"]["highlight_text"]
+                header_bg = style_settings["dark_palette"]["button"] if theme == "dark" else style_settings["light_palette"]["button"]
+                header_text = style_settings["dark_palette"]["button_text"] if theme == "dark" else style_settings["light_palette"]["button_text"]
+
+                child_widget.setStyleSheet(style_settings["list_tree_style_template"].format(
+                    bg_color=list_tree_bg.name(),
+                    text_color=list_tree_text.name(),
+                    border_color=list_tree_border,
+                    font_size=style_settings["font"].pointSize(), # Se usa el tamaño de fuente general
+                    highlight_color=list_tree_highlight.name(),
+                    highlight_text_color=list_tree_highlight_text.name(),
+                    header_bg_color=header_bg.name(),
+                    header_text_color=header_text.name()
+                ))
+
+            elif isinstance(child_widget, (QLineEdit, QComboBox)):
+                bg_color = style_settings["dark_palette"]["base"].name() if theme == "dark" else style_settings["light_palette"]["base"].name()
+                text_color = style_settings["dark_palette"]["text"].name() if theme == "dark" else style_settings["light_palette"]["text"].name()
+                border_color = style_settings["dark_border"] if theme == "dark" else style_settings["light_border"]
+                accent_color = COLOR_BREEZE_ACCENT # Color de borde para el foco
+
+                child_widget.setStyleSheet(STYLE_BREEZE["lineedit_combobox_style_template"].format(
+                    bg_color=bg_color,
+                    text_color=text_color,
+                    border_color=border_color,
+                    accent_color=accent_color
+                ))
+            elif isinstance(child_widget, (QCheckBox, QRadioButton)):
+                text_color = style_settings["dark_palette"]["text"].name() if theme == "dark" else style_settings["light_palette"]["text"].name()
+                child_widget.setStyleSheet(STYLE_BREEZE["checkbox_radiobutton_style_template"].format(
+                    text_color=text_color
+                ))
+
+        widget.repaint()

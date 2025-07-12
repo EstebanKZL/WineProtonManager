@@ -1,11 +1,11 @@
 import sys
+import shutil
 from PyQt5.QtWidgets import QApplication, QPushButton
 from PyQt5.QtCore import Qt, QProcess, QSize
 from PyQt5.QtGui import QIcon
 
 from config_manager import ConfigManager
 from ui.main_window import InstallerApp # Importar InstallerApp de su nuevo módulo
-from styles import apply_breeze_style_to_widget # Importar la función de aplicación de estilo
 
 if __name__ == "__main__":
     # Aumentar el límite de recursión por defecto (precaución: puede consumir más memoria)
@@ -17,23 +17,13 @@ if __name__ == "__main__":
             QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
         if hasattr(Qt, 'AA_UseHighDpiPixmaps'):
             QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-
+            
         app = QApplication(sys.argv)
         app.setStyle("Fusion") # Fusion es un buen estilo base para temas personalizados
-
-        # PASO CRÍTICO: Instanciar ConfigManager PRIMERO
-        # Y pasar una referencia a la aplicación (app) para que ConfigManager pueda interactuar con ella si es necesario,
-        # aunque en este caso la referencia a 'app_instance' en ConfigManager no se usa para consultar el estado de los hilos de InstallerApp.
-        # En su lugar, el InstallerApp se encargará de pasar su propia referencia a ConfigManager.
         config_manager = ConfigManager(None) # Temporalmente sin app_instance, se asignará más tarde.
 
         # Luego, instanciar InstallerApp con el config_manager ya creado
         installer = InstallerApp(config_manager)
-
-        # Ahora que installer tiene una referencia válida, se actualiza la referencia interna en config_manager
-        # (Aunque en este código en particular, la referencia app_instance en ConfigManager no es estrictamente usada
-        # para la lógica de los botones en ConfigDialog. La ConfigDialog ya consulta directamente a InstallerApp.
-        # Pero es una buena práctica asegurar la bidireccionalidad si fuera necesaria.)
         config_manager.app_instance = installer
 
         # Ajustar tamaño de la ventana al tamaño guardado o por defecto, y limitarlo a la pantalla disponible

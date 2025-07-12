@@ -14,6 +14,7 @@ from pathlib import Path
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtWidgets import QMessageBox, QApplication
+from config_manager import ConfigManager
 
 # Deshabilitar verificación SSL (usar con precaución y solo si las fuentes son de confianza).
 ssl._create_default_https_context = ssl._create_unverified_context
@@ -23,7 +24,7 @@ class DownloadThread(QThread):
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
 
-    def __init__(self, url: str, destination_path: Path, name: str, config_manager):
+    def __init__(self, url: str, destination_path: Path, name: str, config_manager: ConfigManager):
         super().__init__()
         self.url = url
         self.destination = destination_path
@@ -105,7 +106,7 @@ class DecompressionThread(QThread):
     error = pyqtSignal(str)
     progress = pyqtSignal(int) # Este hilo no emite progreso detallado, pero se mantiene para consistencia
 
-    def __init__(self, archive_path: str, config_manager, name: str):
+    def __init__(self, archive_path: str, config_manager: ConfigManager, name: str):
         super().__init__()
         self.archive_path = Path(archive_path)
         self.config_manager = config_manager
@@ -157,7 +158,7 @@ class DecompressionThread(QThread):
                 if self.archive_path.suffix == '.zip':
                     with zipfile.ZipFile(self.archive_path, 'r') as zip_ref:
                         zip_ref.extractall(temp_unzip_dir)
-                elif self.archive_path.suffix in ['.gz', '.xz', '.bz2', '.zst'] or self.archive_path.name.endswith(('.tar.gz', '.tar.xz')):
+                elif self.archive_path.suffix in ['.gz', '.xz', '.bz2', '.zst'] or self.archive_path.name.endswith(('.tar.gz', '.tar.xz', '.tar.bz2', '.tar.zst')):
                     # Determinar el modo correcto para tarfile
                     mode = "r:" + self.archive_path.suffix[1:]
                     if self.archive_path.name.endswith('.tar.gz'):

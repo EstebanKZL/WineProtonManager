@@ -3,6 +3,7 @@ import os
 import subprocess
 import time
 import tempfile
+import shutil
 from pathlib import Path
 
 from PyQt5.QtCore import QThread, pyqtSignal
@@ -61,7 +62,7 @@ class InstallerThread(QThread):
             self.progress.emit(display_name_for_progress, f"Instalando")
             self.config_manager.write_to_log(display_name_for_progress, f"Iniciando instalación: {item_path_or_name} (Tipo: {item_type}, Silencioso: {self.silent_mode}, Forzado: {self.force_mode})")
 
-            temp_log_path = None
+            temp_log_path = None # Se sigue usando temp_log_path para capturar stdout/stderr del proceso antes de agregarlo al log unificado.
             try:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".log", mode='w+', encoding='utf-8') as temp_log_file:
                     temp_log_path = Path(temp_log_file.name)
@@ -75,7 +76,7 @@ class InstallerThread(QThread):
                 else:
                     raise ValueError(f"Tipo de instalación no reconocido: {item_type}")
 
-                self._register_successful_installation(display_name_for_progress)
+                self._register_successful_installation(display_name_for_progress, item_type, item_path_or_name) # MODIFICACIÓN 3: Pasar item_type y item_path_or_name
                 self.progress.emit(display_name_for_progress, f"Finalizado")
                 self.config_manager.write_to_log(display_name_for_progress, f"Instalación de {display_name_for_progress} completada exitosamente.")
 
@@ -182,7 +183,7 @@ class InstallerThread(QThread):
 
             retcode = self.current_process.returncode
 
-            # Escribir el log completo al archivo temporal
+            # Escribir el log completo al archivo temporal (esto es solo para debugging si se desea)
             with open(temp_log_path, 'w', encoding='utf-8') as f:
                 f.write(log_content)
 
@@ -203,19 +204,21 @@ class InstallerThread(QThread):
         except Exception as e:
             raise Exception(f"Error inesperado al ejecutar comando: {str(e)}")
 
-    def _register_successful_installation(self, display_name: str):
-        """Registra una instalación exitosa en el log del prefijo."""
+    def _register_successful_installation(self, display_name: str, item_type: str, original_path_or_name: str): # MODIFICACIÓN 3: Nuevos parámetros
+        """
+        MODIFICACIÓN 3: Registra una instalación exitosa en el log del prefijo (wineprotomanager.ini).
+        Añade más contexto al registro.
+        """
         prefix_path = Path(self.env["WINEPREFIX"])
-        log_file = prefix_path / "wineprotonmanager.log"
+        # MODIFICACIÓN 3: Cambiar a wineprotomanager.ini
+        log_file = prefix_path / "wineprotonmanager.ini"
         try:
+            # Usar un formato simple para el .ini
+            entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} installed {display_name} (Type: {item_type}, Source: {original_path_or_name})"
             with open(log_file, 'a', encoding='utf-8') as f:
-                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} installed {display_name}\n")
+                f.write(f"{entry}\n")
         except IOError as e:
             self.config_manager.write_to_log(display_name, f"Advertencia: No se pudo escribir en el log del prefijo {log_file}: {e}")
-
-    # [MODIFICACIÓN 1] Este método ya no se usará para detener la instalación,
-    # sino que se reportará el error y se continuará.
-    # Se ha trasladado la lógica de manejo de errores al bloque try-except en `run()`.
 
     def stop(self):
         """Detiene la instalación, incluyendo el proceso hijo."""
@@ -233,75 +236,87 @@ class InstallerThread(QThread):
 
 # --- Hilo de Backup ---
 class BackupThread(QThread):
-    progress_update = pyqtSignal(str) # Emite mensajes de progreso para la UI
-    finished = pyqtSignal(bool, str) # Emite (éxito, mensaje final)
+    progress_update = pyqtSignal(str)
+    finished = pyqtSignal(bool, str, str, str) # MODIFICACIÓN: Añadir config_name al finished signal
 
-    def __init__(self, source_path: Path, destination_path: Path, config_manager: ConfigManager):
+    def __init__(self, source_path: Path, destination_path: Path, config_manager: ConfigManager, is_full_backup: bool, config_name: str): # MODIFICACIÓN: Añadir config_name
         super().__init__()
         self.source_path = source_path
         self.destination_path = destination_path
         self.config_manager = config_manager
+        self.is_full_backup = is_full_backup
+        self.config_name = config_name # Guardar config_name
         self._is_running = True
         self._process: subprocess.Popen | None = None
 
     def run(self):
-        self.config_manager.write_to_backup_log(f"Iniciando backup de '{self.source_path}' a '{self.destination_path}'")
+        self.config_manager.write_to_backup_log(f"Iniciando backup de '{self.source_path}' a '{self.destination_path}' para '{self.config_name}'") # MODIFICACIÓN: Log más detallado
         try:
             if not self.source_path.exists() or not self.source_path.is_dir():
                 raise FileNotFoundError(f"La carpeta de origen del prefijo no existe: {self.source_path}")
 
-            self.destination_path.mkdir(parents=True, exist_ok=True) # Asegurar que el destino exista
-
-            # Usar rsync para el backup
             rsync_command = ["rsync", "-av", "--no-o", "--no-g"]
 
-            # Si el backup automático está deshabilitado, usar --checksum para incremental basado en contenido
-            if not self.config_manager.get_automatic_backup_enabled():
+            final_backup_path_str = "" # Inicializar aquí
+            if not self.is_full_backup: # Si es backup incremental (rsync)
                 rsync_command.append("--checksum")
-                self.config_manager.write_to_backup_log("Realizando backup incremental con --checksum.")
+                self.config_manager.write_to_backup_log("Realizando backup incremental con rsync --checksum.")
+                rsync_command.append(f"{self.source_path}/")
+                rsync_command.append(str(self.destination_path))
+                final_backup_path_str = str(self.destination_path) # El destino es el backup existente
             else:
                 self.config_manager.write_to_backup_log("Realizando backup completo (nueva carpeta con timestamp).")
+                temp_backup_dir = self.destination_path.parent / (self.destination_path.name + "_tmp")
+                temp_backup_dir.mkdir(parents=True, exist_ok=True)
 
-            rsync_command.append(f"{self.source_path}/") # La barra al final es crucial para copiar el contenido
-            rsync_command.append(str(self.destination_path))
+                rsync_command.append(f"{self.source_path}/")
+                rsync_command.append(str(temp_backup_dir))
+                final_backup_path_str = str(self.destination_path) # Este es el nombre final deseado
 
             self.progress_update.emit("Iniciando sincronización...")
             self.config_manager.write_to_backup_log(f"Comando rsync: {' '.join(rsync_command)}")
 
-            # Iniciar el proceso de rsync
             self._process = subprocess.Popen(rsync_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, universal_newlines=True, preexec_fn=os.setsid)
 
-            # Leer la salida en tiempo real
             while self._process.poll() is None and self._is_running:
                 line = self._process.stdout.readline()
                 if line:
                     self.progress_update.emit(line.strip())
                 else:
-                    QThread.msleep(50) # Pequeña pausa para no saturar
-                QApplication.processEvents() # Permitir que la UI se actualice
+                    QThread.msleep(50)
+                QApplication.processEvents()
 
-            stdout, stderr = self._process.communicate() # Leer el resto de la salida al finalizar
+            stdout, stderr = self._process.communicate()
 
             if not self._is_running:
-                self.finished.emit(False, "Backup cancelado por el usuario.")
+                self.finished.emit(False, "Backup cancelado por el usuario.", "", self.config_name) # MODIFICACIÓN: Añadir config_name
                 self.config_manager.write_to_backup_log("Backup cancelado por el usuario.")
+                if self.is_full_backup and temp_backup_dir.exists():
+                    shutil.rmtree(temp_backup_dir, ignore_errors=True)
             elif self._process.returncode == 0:
-                success_msg = f"Backup de '{self.source_path.name}' completado exitosamente a '{self.destination_path}'."
+                if self.is_full_backup:
+                    shutil.move(str(temp_backup_dir), str(Path(final_backup_path_str))) # Asegurarse de que Path() se usa correctamente
+                    self.config_manager.set_last_full_backup_path(self.config_name, final_backup_path_str) # MODIFICACIÓN: Guardar la ruta para esta config
+                    success_msg = f"Backup COMPLETO de '{self.source_path.name}' completado exitosamente a '{final_backup_path_str}'."
+                else:
+                    success_msg = f"Backup INCREMENTAL de '{self.source_path.name}' completado exitosamente a '{self.destination_path}'."
                 self.config_manager.write_to_backup_log(success_msg)
-                self.finished.emit(True, success_msg)
+                self.finished.emit(True, success_msg, final_backup_path_str, self.config_name) # MODIFICACIÓN: Añadir config_name
             else:
                 error_msg = f"Rsync falló con código {self._process.returncode}.\nStderr: {stderr}\nStdout: {stdout}"
                 self.config_manager.write_to_backup_log(f"ERROR: {error_msg}")
-                self.finished.emit(False, f"Error durante el backup: {stderr.strip() or stdout.strip()}")
+                if self.is_full_backup and temp_backup_dir.exists():
+                    shutil.rmtree(temp_backup_dir, ignore_errors=True)
+                self.finished.emit(False, f"Error durante el backup: {stderr.strip() or stdout.strip()}", "", self.config_name) # MODIFICACIÓN: Añadir config_name
 
         except FileNotFoundError as e:
             msg = f"Error: Comando rsync no encontrado o ruta de origen/destino inválida. Asegúrate de que rsync esté instalado. {e}"
             self.config_manager.write_to_backup_log(f"ERROR: {msg}")
-            self.finished.emit(False, msg)
+            self.finished.emit(False, msg, "", self.config_name) # MODIFICACIÓN: Añadir config_name
         except Exception as e:
             msg = f"Error inesperado durante el backup: {str(e)}"
             self.config_manager.write_to_backup_log(f"ERROR: {msg}")
-            self.finished.emit(False, msg)
+            self.finished.emit(False, msg, "", self.config_name) # MODIFICACIÓN: Añadir config_name
 
     def stop(self):
         """Detiene el hilo y el subproceso de backup."""

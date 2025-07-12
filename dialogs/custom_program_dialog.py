@@ -2,13 +2,13 @@ from pathlib import Path
 
 from PyQt5.QtWidgets import (
     QDialog, QFormLayout, QLineEdit, QPushButton, QFileDialog,
-    QDialogButtonBox, QMessageBox, QHBoxLayout
+    QDialogButtonBox, QMessageBox, QHBoxLayout, QWidget
 )
 from PyQt5.QtCore import Qt, QDir
 from config_manager import ConfigManager
 
 class CustomProgramDialog(QDialog):
-    def __init__(self, config_manager: ConfigManager, parent: None = None):
+    def __init__(self, config_manager: ConfigManager, parent: QWidget | None = None):
         super().__init__(parent)
         self.config_manager = config_manager # Pasar config_manager para aplicar estilos
         self.setWindowTitle("Añadir Programa Personalizado")
@@ -42,7 +42,8 @@ class CustomProgramDialog(QDialog):
 
     def browse_program(self):
         """Abre un diálogo para seleccionar el programa o script."""
-        default_dir = self.config_manager.programs_dir
+        # MODIFICACIÓN 4: Usar la última carpeta explorada para programas
+        default_dir = self.config_manager.get_last_browsed_dir("programs")
 
         dialog = QFileDialog(self)
         dialog.setOption(QFileDialog.DontUseNativeDialog) # Usar diálogo nativo de Qt para un control más consistente
@@ -57,6 +58,9 @@ class CustomProgramDialog(QDialog):
             selected_file = dialog.selectedFiles()
             if selected_file:
                 self.edit_path.setText(selected_file[0])
+                # MODIFICACIÓN 4: Guardar la nueva ruta explorada
+                self.config_manager.set_last_browsed_dir("programs", str(Path(selected_file[0]).parent))
+
 
     def get_program_info(self) -> dict:
         """Obtiene la información del programa ingresado."""

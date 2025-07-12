@@ -1,14 +1,15 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QDialogButtonBox,
-    QHeaderView
+    QHeaderView, QWidget
 )
 from PyQt5.QtCore import Qt # Asegúrate de que Qt esté importado
 from PyQt5.QtGui import QFont
 
-from styles import STYLE_BREEZE, COLOR_BREEZE_PRIMARY, apply_breeze_style_to_widget
+from styles import STYLE_BREEZE, COLOR_BREEZE_PRIMARY
+from config_manager import ConfigManager
 
 class SelectGroupsDialog(QDialog):
-    def __init__(self, component_groups: dict[str, list[str]], config_manager, parent=None):
+    def __init__(self, component_groups: dict[str, list[str]], config_manager: ConfigManager, parent: QWidget | None = None):
         super().__init__(parent)
         self.component_groups = component_groups
         self.config_manager = config_manager # Pasar config_manager para aplicar estilos
