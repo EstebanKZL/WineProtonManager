@@ -1,5 +1,51 @@
 # Changelog Novedades
 
+## [v1.4.0] - 2025-07-12 🎉
+
+**¡Esta versión trae una renovación significativa en la interfaz de usuario y mejoras internas clave para una experiencia más fluida y robusta!**
+
+### ✨ Novedades y Mejoras:
+
+* **Diseño de Interfaz Casi Nuevo (Breeze Style):**
+    * Implementación de un sistema de estilos inspirado en "Breeze" de Plasma 6.0, con colores y tipografías centralizadas para un aspecto más moderno y consistente.
+    * Se han definido y aplicado paletas de colores separadas para temas claros y oscuros, mejorando la legibilidad y la estética general.
+    * Estilos mejorados para botones, tablas, GroupBox, listas, árboles, campos de texto (QLineEdit) y combobox (QComboBox), incluyendo efectos de `:hover` y `:pressed` para una mejor interactividad.
+    * **MODIFICACIÓN 3:** Ajuste del tamaño de fuente en varios widgets como QListWidget y QTreeWidget para mejorar la densidad de información y la lectura.
+
+* **Gestión de Logs Unificada y Mejorada:**
+    * Centralización de la gestión de logs de instalación en un archivo `installation.log` dentro del directorio de configuración.
+    * Implementación de un log de backup separado (`backup.log`) para un seguimiento más claro de las operaciones de respaldo.
+    * Todos los mensajes de log incluyen ahora marcas de tiempo y el nombre del programa o acción, facilitando la depuración y el seguimiento.
+
+* **Lógica de Backup Renovada y más Segura:**
+    * **MODIFICACIÓN:** La ruta del último backup completo ahora se almacena por *cada configuración* de Wine/Proton, permitiendo backups incrementales (Rsync) más precisos para entornos específicos.
+    * El proceso de backup completo crea una carpeta con un `timestamp` para evitar sobrescrituras accidentales.
+    * Los backups incrementales (Rsync) ahora requieren un backup completo previo para la configuración actual, con advertencias claras si no existe.
+    * Diálogos de backup más informativos y con opciones claras para "Rsync (Incremental)" o "Backup Completo (Nuevo)".
+    * Mejoras en el manejo de errores durante el proceso de backup y limpieza de archivos temporales.
+
+* **Mejoras en la Instalación de Programas y Componentes:**
+    * **MODIFICACIÓN 1:** La lista de instalación ahora mantiene el estado de los ítems ("Finalizado", "Error", "Omitido", "Cancelado"), y los ítems con error/cancelados permanecen marcados para facilitar reintentos.
+    * **MODIFICACIÓN 1:** Introducción de un `item_error` signal en `InstallerThread` para manejar errores de ítems individuales sin detener toda la secuencia de instalación.
+    * El diálogo de progreso de instalación ahora es "NonModal", permitiendo al usuario interactuar con la ventana principal (ver la tabla de ítems, por ejemplo) mientras la instalación está en curso, aunque los botones de control de instalación se deshabilitan correctamente.
+    * Al re-tildar un programa en la tabla después de una instalación, su estado se restablece a "Pendiente".
+    * Mensajes de advertencia más claros al intentar añadir programas/componentes que ya están en la lista o registrados como instalados en el prefijo.
+    * El proceso de inicialización de prefijos (`wineboot`) ahora se maneja de forma más robusta y con mensajes de progreso.
+    * **MODIFICACIÓN 3:** Los registros de instalación exitosa en `wineprotomanager.ini` ahora incluyen el tipo de ítem y la ruta/nombre original para mayor detalle.
+
+* **Direccionamiento y Persistencia de Rutas de Carpeta:**
+    * **MODIFICACIÓN 4:** La aplicación ahora recuerda la última carpeta explorada para diferentes tipos de archivos (prefijos Wine/Proton, instalaciones de Wine/Proton, programas, Winetricks), mejorando la usabilidad al abrir diálogos de archivo.
+
+* **Robustez y Manejo de Errores:**
+    * Mejora general en el manejo de excepciones y validaciones de rutas para operaciones críticas (descargas, descompresiones, comandos de Wine/Proton).
+    * Aumento del límite de recursión de Python para prevenir `RecursionError` en entornos con muchas configuraciones o listas largas.
+    * Manejo más eficiente de la interrupción de hilos de descarga e instalación.
+
+### ⚠️ Consideraciones Importantes:
+
+* **Reiniciar la Aplicación:** Los cambios en la configuración del tema y otras configuraciones generales ahora requieren un reinicio completo de la aplicación para aplicarse globalmente. El diálogo de configuración lo indicará y facilitará el reinicio.
+* **Permisos de Winetricks:** Se ha mejorado la detección y validación de la ruta de Winetricks. Si tienes problemas, asegúrate de que el archivo `winetricks` tenga permisos de ejecución.
+* **Compatibilidad de Winetricks Scripts (.wtr):** La adición de scripts `.wtr` personalizados para instalación de componentes de Winetricks permite mayor flexibilidad.
 ## [v1.3.0] - 2025-07-09 🎉
 ### Descarga de Repositorios para Wine y Proton
 - Nueva pestaña "Descargas de Versiones" en el diálogo de configuración
