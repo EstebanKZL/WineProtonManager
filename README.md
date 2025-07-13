@@ -4,7 +4,7 @@
 ![PyQt5](https://img.shields.io/badge/PyQt5-5.15+-green.svg)
 ![License](https://img.shields.io/badge/license-GPLv3-orange.svg)
 
-## **Herramienta GUI para gestionar entornos Wine/Proton e instalar componentes con interfaz gráfica**  
+## **Herramienta GUI para gestionar entornos Wine/Proton e instalar componentes con interfaz gráfica Qt.**  
 
 🔧 **Características principales**:  
 - Gestión de múltiples prefixes (Wine y Proton)  
