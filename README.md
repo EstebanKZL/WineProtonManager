@@ -4,7 +4,7 @@
 ![PyQt5](https://img.shields.io/badge/PyQt5-5.15+-green.svg)
 ![License](https://img.shields.io/badge/license-GPLv3-orange.svg)
 
-## 🇪🇸 Descripción
+## Descripción
 
 **WineProtonManager es una herramienta en Python que te permite gestionar, organizar y cambiar fácilmente las versiones de Proton y Wine para tus juegos en Steam y aplicaciones en Linux (incluyendo Steam Deck).**
 
@@ -18,7 +18,7 @@
 
 ---
 
-## 🇬🇧 Description
+## Description
 
 **WineProtonManager is a Python tool that allows you to easily manage, organize, and switch Proton and Wine versions for your Steam games and Linux applications (including Steam Deck).**
 
