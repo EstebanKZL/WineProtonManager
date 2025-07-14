@@ -22,8 +22,8 @@
 - Winetricks
 
 🖼️ **Captura**:  
-![Screenshot](docs/screenshot.png)
-
+![Screenshot](docs/screenshot-01.png)
+![Screenshot](docs/screenshot-02.png)
 ---
 🚀 Instalación  
 
