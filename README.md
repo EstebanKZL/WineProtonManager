@@ -45,3 +45,12 @@
 
 ## Licencia
 Este proyecto está licenciado bajo [GPL-3.0](LICENSE).
+
+---
+
+### ✅ 6️⃣ Palabras clave al final
+
+```markdown
+## Palabras clave
+
+Proton, Wine, Linux gaming, Steam Deck, Steam Linux, proton manager, wine manager, compatdata, configuración proton, herramientas Linux juegos
