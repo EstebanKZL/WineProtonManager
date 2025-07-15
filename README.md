@@ -1,8 +1,4 @@
-# 🍷 WineProton Manager
-
-![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
-![PyQt5](https://img.shields.io/badge/PyQt5-5.15+-green.svg)
-![License](https://img.shields.io/badge/license-GPLv3-orange.svg)
+# 🍷 WineProton Manager ![Python](https://img.shields.io/badge/python-3.8+-blue.svg) ![PyQt5](https://img.shields.io/badge/PyQt5-5.15+-green.svg) ![License](https://img.shields.io/badge/license-GPLv3-orange.svg)
 
 ## Descripción
 
@@ -16,7 +12,6 @@
 - Interfaz intuitiva con temas claro/oscuro
 - Compatible con Linux (incluye Steam Deck)
 
----
 
 ## Description
 
