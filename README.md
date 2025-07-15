@@ -34,14 +34,22 @@
 
 ## 🖥️ Screenshots / Capturas
 
-<table>
+<table style="width: 100%; border-collapse: collapse;">
   <tr>
-    <td><img src="docs/screenshot-01.png" alt="Screenshot 1" style="width:100%"></td>
-    <td><img src="docs/screenshot-02.png" alt="Screenshot 2" style="width:100%"></td>
+    <td style="width: 50%; padding: 5px;">
+      <img src="docs/screenshot-01.png" style="width: 100%; height: auto; object-fit: contain; border: 1px solid #ddd;">
+    </td>
+    <td style="width: 50%; padding: 5px;">
+      <img src="docs/screenshot-02.png" style="width: 100%; height: auto; object-fit: contain; border: 1px solid #ddd;">
+    </td>
   </tr>
   <tr>
-    <td><img src="docs/screenshot-03.png" alt="Screenshot 3" style="width:100%"></td>
-    <td><img src="docs/screenshot-04.png" alt="Screenshot 4" style="width:100%"></td>
+    <td style="width: 50%; padding: 5px;">
+      <img src="docs/screenshot-03.png" style="width: 100%; height: auto; object-fit: contain; border: 1px solid #ddd;">
+    </td>
+    <td style="width: 50%; padding: 5px;">
+      <img src="docs/screenshot-04.png" style="width: 100%; height: auto; object-fit: contain; border: 1px solid #ddd;">
+    </td>
   </tr>
 </table>
 
