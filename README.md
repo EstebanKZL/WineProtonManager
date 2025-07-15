@@ -34,8 +34,16 @@
 
 ## 🖥️ Screenshots / Capturas
 
-![Screenshot](docs/screenshot-01.png)
-![Screenshot](docs/screenshot-02.png)
+<table>
+  <tr>
+    <td><img src="docs/screenshot-01.png" alt="Screenshot 1" style="width:100%"></td>
+    <td><img src="docs/screenshot-02.png" alt="Screenshot 2" style="width:100%"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshot-03.png" alt="Screenshot 3" style="width:100%"></td>
+    <td><img src="docs/screenshot-04.png" alt="Screenshot 4" style="width:100%"></td>
+  </tr>
+</table>
 
 ---
 
