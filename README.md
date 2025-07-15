@@ -33,26 +33,9 @@
 ---
 
 ## 🖥️ Screenshots / Capturas
-
-<table style="width: 100%; border-collapse: collapse;">
-  <tr>
-    <td style="width: 50%; padding: 5px;">
-      <img src="docs/screenshot-01.png" style="width: 100%; height: auto; object-fit: contain; border: 1px solid #ddd;">
-    </td>
-    <td style="width: 50%; padding: 5px;">
-      <img src="docs/screenshot-02.png" style="width: 100%; height: auto; object-fit: contain; border: 1px solid #ddd;">
-    </td>
-  </tr>
-  <tr>
-    <td style="width: 50%; padding: 5px;">
-      <img src="docs/screenshot-03.png" style="width: 100%; height: auto; object-fit: contain; border: 1px solid #ddd;">
-    </td>
-    <td style="width: 50%; padding: 5px;">
-      <img src="docs/screenshot-04.png" style="width: 100%; height: auto; object-fit: contain; border: 1px solid #ddd;">
-    </td>
-  </tr>
-</table>
-
+![Screenshot 1](docs/screenshot-01.png) | ![Screenshot 2](docs/screenshot-02.png)
+--- | ---
+![Screenshot 3](docs/screenshot-03.png) | ![Screenshot 4](docs/screenshot-04.png)
 ---
 
 ## 🚀 Instalación / Installation
