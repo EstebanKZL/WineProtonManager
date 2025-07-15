@@ -57,4 +57,4 @@ pip install -r requirements.txt
 python3 main.py
 =======
 cd WineProtonManager
->>>>>>> d7b2b19 ("Update V1.5.0")
+>>>>>>> d7b2b19 ("Update V1.5.1")
