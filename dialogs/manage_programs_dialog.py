@@ -2,6 +2,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QTableWidget, QHeaderView, QH
                              QPushButton, QMessageBox, QTableWidgetItem, QWidget)
 from PyQt5.QtCore import Qt
 
+from pathlib import Path
 from config_manager import ConfigManager
 
 class ManageProgramsDialog(QDialog):
