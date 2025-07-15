@@ -1046,19 +1046,20 @@ class InstallerApp(QWidget):
         """Abre el diálogo para seleccionar componentes de Winetricks."""
         # Definición de grupos de componentes de Winetricks
         component_groups = {
-            "Librerias de Visual Basic": ["vb2run", "vb3run", "vb4run", "vb5run", "vb6run"],
-            "Librerias de Visual Basic C++": [
+            "Bibliotecas Visual Basic": ["vb2run", "vb3run", "vb4run", "vb5run", "vb6run"],
+            "Visual C++ Runtime": [
                 "vcrun6", "vcrun6sp6", "vcrun2003", "vcrun2005", "vcrun2008",
                 "vcrun2010", "vcrun2012", "vcrun2013", "vcrun2015", "vcrun2017",
                 "vcrun2019", "vcrun2022"
             ],
-            "Framework .NET": [
+            ".NET Framework": [
                 "dotnet11", "dotnet11sp1", "dotnet20", "dotnet20sp1", "dotnet20sp2",
                 "dotnet30", "dotnet30sp1", "dotnet35", "dotnet35sp1", "dotnet40",
                 "dotnet40_kb2468871", "dotnet45", "dotnet452", "dotnet46", "dotnet461",
                 "dotnet462", "dotnet471", "dotnet472", "dotnet48", "dotnet6", "dotnet7",
                 "dotnet8", "dotnet9", "dotnetcore2", "dotnetcore3", "dotnetcoredesktop3",
-                "dotnetdesktop6", "dotnetdesktop7", "dotnetdesktop8", "dotnetdesktop9"
+                "dotnetdesktop6", "dotnetdesktop7", "dotnetdesktop8", "dotnetdesktop9",
+                "dotnet_verifier", "vjrun20"
             ],
             "DirectX y Multimedia": [
                 "d3dcompiler_42", "d3dcompiler_43", "d3dcompiler_46", "d3dcompiler_47",
@@ -1072,13 +1073,26 @@ class InstallerApp(QWidget):
                 "dx8vb", "dxdiag", "dxdiagn", "dxdiagn_feb2010", "dxtrans", "xact",
                 "xact_x64", "xaudio29", "xinput", "xna31", "xna40"
             ],
+            "DXVK y VKD3D": [
+                "dxvk", "dxvk1000", "dxvk1001", "dxvk1002", "dxvk1003", "dxvk1011",
+                "dxvk1020", "dxvk1021", "dxvk1022", "dxvk1023", "dxvk1030", "dxvk1031",
+                "dxvk1032", "dxvk1033", "dxvk1034", "dxvk1040", "dxvk1041", "dxvk1042",
+                "dxvk1043", "dxvk1044", "dxvk1045", "dxvk1046", "dxvk1050", "dxvk1051",
+                "dxvk1052", "dxvk1053", "dxvk1054", "dxvk1055", "dxvk1060", "dxvk1061",
+                "dxvk1070", "dxvk1071", "dxvk1072", "dxvk1073", "dxvk1080", "dxvk1081",
+                "dxvk1090", "dxvk1091", "dxvk1092", "dxvk1093", "dxvk1094", "dxvk1100",
+                "dxvk1101", "dxvk1102", "dxvk1103", "dxvk2000", "dxvk2010", "dxvk2020",
+                "dxvk2030", "dxvk2040", "dxvk2041", "dxvk2050", "dxvk2051", "dxvk2052",
+                "dxvk2053", "dxvk2060", "dxvk2061", "dxvk2062", "dxvk2070", "vkd3d",
+                "dxvk_nvapi0061"
+            ],
             "Codecs Multimedia": [
                 "allcodecs", "avifil32", "binkw32", "cinepak", "dirac", "ffdshow",
                 "icodecs", "l3codecx", "lavfilters", "lavfilters702", "ogg", "qasf",
                 "qcap", "qdvd", "qedit", "quartz", "quartz_feb2010", "quicktime72",
                 "quicktime76", "wmp9", "wmp10", "wmp11", "wmv9vcm", "xvid"
             ],
-            "Componentes del Sistema": [
+            "Componentes de Sistema": [
                 "amstream", "atmlib", "cabinet", "cmd", "comctl32", "comctl32ocx",
                 "comdlg32ocx", "crypt32", "crypt32_winxp", "dbghelp", "esent", "filever",
                 "gdiplus", "gdiplus_winxp", "glidewrapper", "glut", "gmdls", "hid",
@@ -1089,7 +1103,7 @@ class InstallerApp(QWidget):
                 "pngfilt", "prntvpt", "python26", "python27", "riched20", "riched30",
                 "richtx32", "sapi", "sdl", "secur32", "setupapi", "shockwave",
                 "speechsdk", "tabctl32", "ucrtbase2019", "uiribbon", "updspapi",
-                "urlmon", "usp10", "webio", "windowscodes", "winhttp", "wininet",
+                "urlmon", "usp10", "webio", "windowscodecs", "winhttp", "wininet",
                 "wininet_win2k", "wmi", "wsh57", "xmllite"
             ],
             "Controladores y Utilidades": [
@@ -1102,7 +1116,7 @@ class InstallerApp(QWidget):
                 "ie8_tls12", "iertutil", "itircl", "itss", "mdx", "mf", "mfc40",
                 "mfc42", "mfc70", "mfc71", "mfc80", "mfc90", "mfc100", "mfc110",
                 "mfc120", "mfc140", "nuget", "openal", "otvdm", "otvdm090",
-                "physx", "powershell", "powershell_core"
+                "physx", "powershell", "powershell_core", "protectionid"
             ],
             "Fuentes": [
                 "allfonts", "andale", "arial", "baekmuk", "calibri", "cambria",
@@ -1114,6 +1128,23 @@ class InstallerApp(QWidget):
                 "sourcehansans", "tahoma", "takao", "times", "trebuchet",
                 "uff", "unifont", "verdana", "vlgothic", "webdings",
                 "wenquanyi", "wenquanyizenhei"
+            ],
+            "Aplicaciones": [
+                "3m_library", "7zip", "adobe_diged", "adobe_diged4", "autohotkey",
+                "busybox", "cmake", "colorprofile", "controlpad", "controlspy",
+                "dbgview", "depends", "dotnet20sdk", "dxsdk_aug2006", "dxsdk_jun2010",
+                "dxwnd", "emu8086", "ev3", "firefox", "fontxplorer", "foobar2000",
+                "hhw", "iceweasel", "irfanview", "kindle", "kobo", "mingw",
+                "mozillabuild", "mpc", "mspaint", "mt4", "njcwp_trial", "njjwp_trial",
+                "nook", "npp", "ollydbg110", "ollydbg200", "ollydbg201", "openwatcom",
+                "origin", "procexp", "psdk2003", "psdkwin71", "safari", "sketchup",
+                "steam", "ubisoftconnect", "utorrent", "utorrent3", "vc2005express",
+                "vc2005expresssp1", "vc2005trial", "vc2008express", "vc2010express",
+                "vstools2019", "winamp", "winrar", "wme9"
+            ],
+            "Benchmarks": [
+                "3dmark03", "3dmark05", "3dmark06", "3dmark2000", "3dmark2001",
+                "stalker_pripyat_bench", "unigine_heaven", "wglgears"
             ]
         }
 
