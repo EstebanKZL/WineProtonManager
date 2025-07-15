@@ -1,18 +1,16 @@
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QDialogButtonBox,
-    QHeaderView, QWidget
-)
-from PyQt5.QtCore import Qt # Asegúrate de que Qt esté importado
+from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem,
+                             QHeaderView, QDialogButtonBox, QWidget )
+from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 
-from styles import STYLE_BREEZE, COLOR_BREEZE_PRIMARY
+from styles import STYLE_BREEZE
 from config_manager import ConfigManager
 
 class SelectGroupsDialog(QDialog):
     def __init__(self, component_groups: dict[str, list[str]], config_manager: ConfigManager, parent: QWidget | None = None):
         super().__init__(parent)
         self.component_groups = component_groups
-        self.config_manager = config_manager # Pasar config_manager para aplicar estilos
+        self.config_manager = config_manager
         self.setWindowTitle("Seleccionar Componentes de Winetricks")
         self.setMinimumSize(600, 550)
         self.setup_ui()
@@ -24,10 +22,9 @@ class SelectGroupsDialog(QDialog):
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Componente", "Descripción"])
         self.tree.setColumnCount(2)
-        self.tree.setSelectionMode(QTreeWidget.NoSelection) # No permitir selección de ítems
-        self.tree.itemChanged.connect(self._handle_item_change) # Conectar la señal de cambio de estado de checkbox
+        self.tree.setSelectionMode(QTreeWidget.NoSelection) 
+        self.tree.itemChanged.connect(self._handle_item_change) 
 
-        # Descripciones detalladas para componentes comunes de Winetricks
         self.component_descriptions = {
             "vb2run": "Runtime de Visual Basic 2.0",
             "vb3run": "Runtime de Visual Basic 3.0",
@@ -401,35 +398,31 @@ class SelectGroupsDialog(QDialog):
             "wenquanyizenhei": "Fuente china WenQuanYi Zen Hei"
         }
 
-        # MODIFICACIÓN 3: Aumentar tamaño de fuente en 3 puntos
         base_font = STYLE_BREEZE["font"]
         tree_font_size = base_font.pointSize() + 0
         font_for_tree = QFont(base_font.family(), tree_font_size)
 
-
-        # Llenar el árbol con grupos y componentes
         for group_name, components in self.component_groups.items():
             group_item = QTreeWidgetItem(self.tree)
             group_item.setText(0, group_name)
-            group_item.setFont(0, font_for_tree) # Aplicar la fuente al grupo
-            # Marcar el ítem del grupo como chequeable con tres estados (Qt.PartiallyChecked)
+            group_item.setFont(0, font_for_tree)
+       
             group_item.setFlags(group_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsTristate)
-            group_item.setCheckState(0, Qt.PartiallyChecked) # Estado inicial
+            group_item.setCheckState(0, Qt.PartiallyChecked) 
 
             for comp in components:
                 child_item = QTreeWidgetItem(group_item)
                 child_item.setText(0, comp)
-                child_item.setFont(0, font_for_tree) # Aplicar la fuente al componente
+                child_item.setFont(0, font_for_tree)
                 child_item.setFlags(child_item.flags() | Qt.ItemIsUserCheckable)
-                child_item.setCheckState(0, Qt.Unchecked) # Por defecto desmarcado
+                child_item.setCheckState(0, Qt.Unchecked)
 
-                # Asignar descripción o una genérica
                 description = self.component_descriptions.get(comp, "Componente estándar de Winetricks.")
                 child_item.setText(1, description)
-                child_item.setFont(1, font_for_tree) # Aplicar la fuente a la descripción
+                child_item.setFont(1, font_for_tree) 
 
-        self.tree.expandAll() # Expandir todos los grupos por defecto
-        # Ajustar el tamaño de las columnas
+        self.tree.expandAll() 
+       
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.tree.header().setSectionResizeMode(1, QHeaderView.Stretch)
         layout.addWidget(self.tree)
@@ -444,20 +437,19 @@ class SelectGroupsDialog(QDialog):
 
     def _handle_item_change(self, item: QTreeWidgetItem, column: int):
         """Maneja el estado de las casillas de verificación de los elementos del árbol (tres estados)."""
-        # Desconectar temporalmente la señal para evitar recursión infinita
         try:
             self.tree.itemChanged.disconnect(self._handle_item_change)
-        except TypeError: # Si ya está desconectada (por ejemplo, en la primera llamada)
+        except TypeError: 
             pass
 
-        if item.flags() & Qt.ItemIsTristate: # Si es un ítem de grupo (tristate)
+        if item.flags() & Qt.ItemIsTristate:
             if item.checkState(0) == Qt.Checked:
                 for i in range(item.childCount()):
                     item.child(i).setCheckState(0, Qt.Checked)
             elif item.checkState(0) == Qt.Unchecked:
                 for i in range(item.childCount()):
                     item.child(i).setCheckState(0, Qt.Unchecked)
-        else: # Si es un ítem hijo
+        else: 
             parent = item.parent()
             if parent:
                 checked_children = 0
@@ -471,7 +463,7 @@ class SelectGroupsDialog(QDialog):
                     parent.setCheckState(0, Qt.Checked)
                 else:
                     parent.setCheckState(0, Qt.PartiallyChecked)
-        # Reconectar la señal
+
         self.tree.itemChanged.connect(self._handle_item_change)
 
 

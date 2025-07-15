@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='WineProtonManager',
-    version='1.4.0',  # You should update this version number as you develop
+    version='1.5.0',  # You should update this version number as you develop
     author='EstebanKZL',  # Replace with your name
     author_email='your.email@example.com',  # Replace with your email
     description='A manager for Wine and Proton versions.',

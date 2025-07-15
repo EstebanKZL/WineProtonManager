@@ -1,26 +1,15 @@
-import sys
 import os
-import subprocess
 import json
+import subprocess
 import re
 import time
-import shutil
 from pathlib import Path
 
-from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QListWidget, QLabel, QCheckBox, QDialog, QDialogButtonBox,
-    QMessageBox, QGroupBox, QComboBox, QLineEdit, QFileDialog,
-    QTabWidget, QFormLayout, QScrollArea, QListWidgetItem,
-    QTableWidget, QTableWidgetItem, QHeaderView,
-    QTreeWidget, QTreeWidgetItem, QProgressDialog, QProgressBar,
-    QInputDialog, QRadioButton, QSizePolicy
-)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QSize, QUrl, QTimer, QProcess
-from PyQt5.QtGui import QIcon, QPalette, QColor, QFont, QDesktopServices
+from PyQt5.QtWidgets import QWidget, QApplication, QPushButton, QTableWidget, QGroupBox, QListWidget, QTreeWidget, QLineEdit, QComboBox, QCheckBox, QRadioButton, QMessageBox
+from PyQt5.QtCore import QSize
+from PyQt5.QtGui import QPalette, QColor
 
-# Importar estilos para aplicar
-from styles import STYLE_BREEZE, COLOR_BREEZE_PRIMARY, COLOR_BREEZE_ACCENT
+from styles import STYLE_BREEZE, COLOR_BREEZE_ACCENT # Importa desde tu nuevo módulo de estilos
 
 class ConfigManager:
     """
@@ -70,7 +59,8 @@ class ConfigManager:
             "force_winetricks_install": False,
             "ask_for_backup_before_action": True,
             "last_browsed_dirs": self.last_browsed_dirs,
-            "last_full_backup_path": {} # MODIFICACIÓN: Cambiado a un diccionario para almacenar por configuración
+            "last_full_backup_path": {},
+            "steam_root_path": ""
         }
 
         default_repositories = {
@@ -89,13 +79,10 @@ class ConfigManager:
         self.configs.setdefault("custom_programs", [])
 
         for key, value in default_settings.items():
-            # Si 'last_full_backup_path' existe pero no es un diccionario (e.g. era una cadena de texto de una versión anterior)
-            # lo convertimos a un diccionario vacío para evitar errores.
             if key == "last_full_backup_path" and not isinstance(self.configs["settings"].get(key), dict):
                 self.configs["settings"][key] = {}
             else:
                 self.configs["settings"].setdefault(key, value)
-
 
         if "last_browsed_dirs" not in self.configs["settings"]:
             self.configs["settings"]["last_browsed_dirs"] = self.last_browsed_dirs
@@ -104,9 +91,33 @@ class ConfigManager:
                 self.configs["settings"]["last_browsed_dirs"].setdefault(key, default_path)
             self.last_browsed_dirs = self.configs["settings"]["last_browsed_dirs"]
 
-        # MODIFICACIÓN: Ya no se necesita esta línea si 'last_full_backup_path' se inicializa como {}
-        # if "last_full_backup_path" not in self.configs["settings"]:
-        #    self.configs["settings"]["last_full_backup_path"] = ""
+        if "Wine-System" not in self.configs["configs"]:
+            self.configs["configs"]["Wine-System"] = {
+                "type": "wine",
+                "prefix": str(Path.home() / ".wine"),
+                "arch": "win64"
+            }
+
+        self.save_configs()
+
+        self.configs.setdefault("configs", {})
+        self.configs.setdefault("last_used", "Wine-System")
+        self.configs.setdefault("settings", default_settings)
+        self.configs.setdefault("repositories", default_repositories)
+        self.configs.setdefault("custom_programs", [])
+
+        for key, value in default_settings.items():
+            if key == "last_full_backup_path" and not isinstance(self.configs["settings"].get(key), dict):
+                self.configs["settings"][key] = {}
+            else:
+                self.configs["settings"].setdefault(key, value)
+
+        if "last_browsed_dirs" not in self.configs["settings"]:
+            self.configs["settings"]["last_browsed_dirs"] = self.last_browsed_dirs
+        else:
+            for key, default_path in self.last_browsed_dirs.items():
+                self.configs["settings"]["last_browsed_dirs"].setdefault(key, default_path)
+            self.last_browsed_dirs = self.configs["settings"]["last_browsed_dirs"]
 
         if "Wine-System" not in self.configs["configs"]:
             self.configs["configs"]["Wine-System"] = {
@@ -173,7 +184,6 @@ class ConfigManager:
 
             if "steam_appid" in config and config["steam_appid"]:
                 steam_compat_data_path_base = Path.home() / ".local/share/Steam/steamapps/compatdata"
-                # Asegurarse de que el WINEPREFIX es el correcto para Steam
                 if not Path(env["WINEPREFIX"]).is_relative_to(steam_compat_data_path_base / config["steam_appid"]):
                     env["WINEPREFIX"] = str(steam_compat_data_path_base / config["steam_appid"] / "pfx")
 
@@ -368,36 +378,29 @@ class ConfigManager:
         size = self.configs.get("settings", {}).get("window_size", [900, 650])
         return QSize(size[0], size[1])
 
-    def get_log_path(self) -> Path:
-        """Obtiene la ruta al archivo de registro unificado para la instalación."""
-        return self.installation_log_file
+    def get_log_path(self, config_name: str) -> Path:
+        """
+        Obtiene la ruta al archivo de log.
+        Si config_name es específico (ej. "Wine-Lutris"), el log será "Wine-Lutris.log".
+        Para logs genéricos (ej. "Downloads"), el log será "wineprotonmanager.log".
+        """
+        # Nombres que usarán el log genérico
+        if config_name in ["Downloads", "wineprotonmanager", "Creación del Prefijo"]:
+            return self.log_dir / "wineprotonmanager.log"
+        else:
+            # Para configuraciones específicas, el nombre del log es el nombre de la config.
+            return self.log_dir / f"{config_name}.log"
 
-    def write_to_log(self, program_name: str, message: str):
-        """Escribe un mensaje con marca de tiempo en el registro de instalación unificado."""
-        log_path = self.get_log_path()
+    def write_to_log(self, config_name: str, source: str, message: str):
+        """Escribe un mensaje con marca de tiempo en el log apropiado."""
+        # El método get_log_path ahora maneja la lógica de cuál archivo usar.
+        log_path = self.get_log_path(config_name)
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         try:
             with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(f"[{timestamp}] [{program_name}] {message}\n")
+                f.write(f"[{timestamp}] [{source}] {message}\n")
         except IOError as e:
             print(f"Error escribiendo en el log {log_path}: {e}")
-
-    def get_backup_log_path(self) -> Path:
-        """Obtiene la ruta al archivo de registro de backup."""
-        current_config_name = self.configs.get("last_used", "default")
-        log_sub_dir = self.log_dir / current_config_name # Todavía se mantiene un subdirectorio para logs de backup
-        log_sub_dir.mkdir(parents=True, exist_ok=True)
-        return log_sub_dir / "backup.log"
-
-    def write_to_backup_log(self, message: str):
-        """Escribe un mensaje con marca de tiempo en el registro de backup."""
-        log_path = self.get_backup_log_path()
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(f"[{timestamp}] {message}\n")
-        except IOError as e:
-            print(f"Error escribiendo en el log de backup {log_path}: {e}")
 
     def get_repositories(self, type_: str) -> list[dict]:
         """Obtiene repositorios para Wine o Proton."""
@@ -439,6 +442,16 @@ class ConfigManager:
         if Path(path).is_dir():
             self.last_browsed_dirs[key] = path
             self.save_configs() # Guardar inmediatamente para persistencia
+
+    def get_steam_root_path(self) -> str:
+        """Obtiene la ruta raíz de Steam configurada por el usuario."""
+        return self.configs.get("settings", {}).get("steam_root_path", "")
+
+    def set_steam_root_path(self, path: str):
+        """Establece la ruta raíz de Steam."""
+        path = path.strip()
+        self.configs.setdefault("settings", {})["steam_root_path"] = path
+        # El guardado se realizará con save_configs() en el diálogo de configuración.
 
     def apply_breeze_style_to_widget(self, widget: QWidget):
         """Aplica el estilo Breeze a un widget y sus hijos de forma recursiva."""

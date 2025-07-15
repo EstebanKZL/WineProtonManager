@@ -1,19 +1,17 @@
-from pathlib import Path
+from PyQt5.QtWidgets import (QDialog, QFormLayout, QLineEdit, QPushButton, QHBoxLayout,
+                             QDialogButtonBox, QFileDialog, QWidget)
+from PyQt5.QtCore import QDir
 
-from PyQt5.QtWidgets import (
-    QDialog, QFormLayout, QLineEdit, QPushButton, QFileDialog,
-    QDialogButtonBox, QMessageBox, QHBoxLayout, QWidget
-)
-from PyQt5.QtCore import Qt, QDir
+from pathlib import Path
 from config_manager import ConfigManager
 
 class CustomProgramDialog(QDialog):
     def __init__(self, config_manager: ConfigManager, parent: QWidget | None = None):
         super().__init__(parent)
-        self.config_manager = config_manager # Pasar config_manager para aplicar estilos
+        self.config_manager = config_manager 
         self.setWindowTitle("Añadir Programa Personalizado")
-        # MODIFICACIÓN 2: Establecer tamaño fijo
-        self.setFixedSize(650, 140) # Establecer un tamaño fijo
+
+        self.setFixedSize(650, 140) 
         self.setup_ui()
         self.config_manager.apply_breeze_style_to_widget(self)
 
@@ -42,25 +40,23 @@ class CustomProgramDialog(QDialog):
 
     def browse_program(self):
         """Abre un diálogo para seleccionar el programa o script."""
-        # MODIFICACIÓN 4: Usar la última carpeta explorada para programas
         default_dir = self.config_manager.get_last_browsed_dir("programs")
 
         dialog = QFileDialog(self)
-        dialog.setOption(QFileDialog.DontUseNativeDialog) # Usar diálogo nativo de Qt para un control más consistente
+        dialog.setOption(QFileDialog.DontUseNativeDialog) 
         dialog.setFileMode(QFileDialog.ExistingFile)
         dialog.setNameFilter("Ejecutables de Windows (*.exe *.msi);;Scripts de Winetricks (*.wtr);;Todos los Archivos (*)")
         dialog.setFilter(QDir.AllEntries | QDir.Hidden | QDir.NoDotAndDotDot)
         dialog.setDirectory(str(default_dir))
 
-        self.config_manager.apply_breeze_style_to_widget(dialog) # Aplicar estilo al diálogo de archivo
+        self.config_manager.apply_breeze_style_to_widget(dialog) 
 
         if dialog.exec_():
             selected_file = dialog.selectedFiles()
             if selected_file:
                 self.edit_path.setText(selected_file[0])
-                # MODIFICACIÓN 4: Guardar la nueva ruta explorada
-                self.config_manager.set_last_browsed_dir("programs", str(Path(selected_file[0]).parent))
 
+                self.config_manager.set_last_browsed_dir("programs", str(Path(selected_file[0]).parent))
 
     def get_program_info(self) -> dict:
         """Obtiene la información del programa ingresado."""
@@ -70,25 +66,25 @@ class CustomProgramDialog(QDialog):
         if not name:
             raise ValueError("Debes especificar un nombre para el programa.")
 
-        program_type = "winetricks" # Valor por defecto si no se puede determinar por extensión
+        program_type = "winetricks" 
 
         path_obj = Path(path)
         if path.lower().endswith(('.exe', '.msi')):
             if not path_obj.exists():
                 raise FileNotFoundError(f"Archivo no encontrado: {path}")
             program_type = "exe"
-            path = str(path_obj.absolute()) # Guardar la ruta absoluta
+            path = str(path_obj.absolute()) 
         elif path.lower().endswith('.wtr'):
             if not path_obj.exists():
                 raise FileNotFoundError(f"Archivo de script no encontrado: {path}")
             program_type = "wtr"
-            path = str(path_obj.absolute()) # Guardar la ruta absoluta
+            path = str(path_obj.absolute()) 
         else:
-            # Si no es .exe, .msi o .wtr, se asume que es un comando de winetricks (ej. "vcrun2019")
+
             program_type = "winetricks"
 
         return {
             "name": name,
-            "path": path, # path puede ser un nombre de componente o una ruta de archivo
+            "path": path, 
             "type": program_type
         }

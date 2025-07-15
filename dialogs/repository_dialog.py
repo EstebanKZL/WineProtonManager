@@ -1,6 +1,4 @@
-from PyQt5.QtWidgets import (
-    QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QMessageBox, QWidget
-)
+from PyQt5.QtWidgets import QDialog, QFormLayout, QLineEdit, QDialogButtonBox, QWidget
 
 from config_manager import ConfigManager
 
@@ -8,7 +6,7 @@ class RepositoryDialog(QDialog):
     def __init__(self, repo_type: str, config_manager: ConfigManager, parent: QWidget | None = None):
         super().__init__(parent)
         self.repo_type = repo_type
-        self.config_manager = config_manager # Pasar config_manager para aplicar estilos
+        self.config_manager = config_manager 
         self.setWindowTitle(f"Añadir Repositorio de {self.repo_type.capitalize()}")
         self.setup_ui()
         self.config_manager.apply_breeze_style_to_widget(self)

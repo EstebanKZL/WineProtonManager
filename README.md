@@ -47,6 +47,7 @@ sudo apt install wine winetricks konsole kdialog libssl3
 
 # Clonar repositorio / Clone repo
 git clone https://github.com/EstebanKZL/WineProtonManager.git
+<<<<<<< HEAD
 cd WineProtonManager
 
 # Instalar dependencias / Install dependencies
@@ -54,3 +55,6 @@ pip install -r requirements.txt
 
 # Ejecutar / Run
 python3 main.py
+=======
+cd WineProtonManager
+>>>>>>> d7b2b19 ("Update V1.5.0")

@@ -1,77 +1,32 @@
 import sys
+import shutil
+import vdf
 import subprocess
 import time
-import shutil
+import re
+
+from functools import wraps
 from pathlib import Path
-from functools import partial
 
-from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QListWidget, QLabel, QCheckBox, QDialog, QDialogButtonBox,
-    QMessageBox, QGroupBox, QComboBox, QLineEdit, QFileDialog,
-    QTabWidget, QFormLayout, QScrollArea, QListWidgetItem,
-    QTableWidget, QTableWidgetItem, QHeaderView,
-    QTreeWidget, QTreeWidgetItem, QProgressDialog, QProgressBar,
-    QInputDialog, QRadioButton, QSizePolicy
-)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QDir, QSize, QUrl, QTimer, QProcess
-from PyQt5.QtGui import QIcon, QPalette, QColor, QFont, QDesktopServices
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+                             QLabel, QCheckBox, QGroupBox, QScrollArea,
+                             QTabWidget, QTableWidget, QHeaderView, QMessageBox,
+                             QProgressDialog, QTableWidgetItem, QApplication, QDialog, QComboBox)
+from PyQt5.QtCore import Qt, QUrl, QTimer, QProcess
+from PyQt5.QtGui import QIcon, QPalette, QColor, QDesktopServices
 
+# Importaciones de tus módulos
 from config_manager import ConfigManager
-from installer_thread import InstallerThread, BackupThread
-from downloader import DownloadThread, DecompressionThread, VersionSearchThread
-from styles import STYLE_BREEZE, COLOR_BREEZE_PRIMARY
-from dialogs import ConfigDialog, CustomProgramDialog, ManageProgramsDialog, SelectGroupsDialog
+from styles import STYLE_BREEZE, COLOR_BREEZE_PRIMARY # Importa solo lo necesario
+from dialogs.config_dialog import ConfigDialog
+from dialogs.custom_program_dialog import CustomProgramDialog
+from dialogs.manage_programs_dialog import ManageProgramsDialog
+from dialogs.select_groups_dialog import SelectGroupsDialog
+from dialogs.installation_progress_dialog import InstallationProgressDialog
+from threads.installer_thread import InstallerThread
+from threads.backup_thread import BackupThread
+from threads.protondb_thread import ProtonDBThread
 
-class InstallationProgressDialog(QDialog):
-    def __init__(self, item_name: str, config_manager: ConfigManager, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setWindowTitle(f"Instalando: {item_name}")
-        self.config_manager = config_manager
-        self.item_name = item_name
-        self.setWindowModality(Qt.NonModal) # Cambiado a NonModal
-        self.setMinimumSize(600, 400)
-        self.setup_ui()
-        self.config_manager.apply_breeze_style_to_widget(self)
-
-    def setup_ui(self):
-        main_layout = QVBoxLayout(self)
-
-        self.label = QLabel(f"Instalando: <b>{self.item_name}</b>")
-        self.label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(self.label)
-
-        self.log_output = QListWidget()
-        self.log_output.setSelectionMode(QListWidget.NoSelection)
-        self.log_output.setVerticalScrollMode(QListWidget.ScrollPerPixel)
-        self.log_output.setWordWrap(True)
-        main_layout.addWidget(self.log_output)
-
-        self.close_button = QPushButton("Cerrar")
-        self.close_button.setAutoDefault(False)
-        self.close_button.clicked.connect(self.accept)
-        # MODIFICACIÓN 1: El botón de cerrar siempre está habilitado en modo NonModal,
-        # pero la señal `accepted` solo se emite si el usuario hace clic.
-        # El diálogo se puede cerrar normalmente.
-        self.close_button.setEnabled(True)
-
-        main_layout.addWidget(self.close_button)
-        self.setLayout(main_layout)
-
-    def append_log(self, text: str):
-        """Añade una línea al log de salida de la consola."""
-        self.log_output.addItem(text)
-        self.log_output.scrollToBottom()
-
-    def set_status(self, status_text: str):
-        """Actualiza el texto de estado en el diálogo."""
-        self.label.setText(f"Estado de la Instalación: <b>{status_text}</b>")
-
-    def closeEvent(self, event):
-        """Permite el cierre del diálogo sin detener el hilo de instalación."""
-        event.accept() # Siempre aceptar el evento de cierre
-
-# --- Ventana Principal ---
 class InstallerApp(QWidget):
     def __init__(self, config_manager: ConfigManager):
         super().__init__()
@@ -81,23 +36,28 @@ class InstallerApp(QWidget):
         self.installation_progress_dialog = None
         self.backup_progress_dialog = None
 
-        self.items_for_installation: list[dict] = [] # Almacena {name, path, type, current_status}
+        self.steam_root = self._locate_steam_root()
+        self.available_proton_versions = []
+        self.steam_games_data = {}
 
-        # Cargar ajustes de sesión al inicio
+        self.worker_threads = []
+
+        self.items_for_installation: list[dict] = []
+
         self.silent_mode = self.config_manager.get_silent_install()
         self.force_mode = self.config_manager.get_force_winetricks_install()
         self.ask_for_backup_before_action = self.config_manager.get_ask_for_backup_before_action()
 
-        self.apply_theme_at_startup() # Aplicar el tema global de la app
+        self.apply_theme_at_startup()
         self.setup_ui()
-        self.config_manager.apply_breeze_style_to_widget(self) # Reaplicar estilos a todos los widgets de la ventana principal
+        self.config_manager.apply_breeze_style_to_widget(self)
         self.setMinimumSize(1000, 700)
-        self.update_installation_button_state() # Actualizar estado inicial de botones
+        self.update_installation_button_state()
 
     def apply_theme_at_startup(self):
         """Aplica el tema inicial de la aplicación a la QApplication."""
         theme = self.config_manager.get_theme()
-        palette = QApplication.palette() # Iniciar con la paleta actual de la app
+        palette = QApplication.palette() 
         style_settings = STYLE_BREEZE
 
         if theme == "dark":
@@ -124,13 +84,12 @@ class InstallerApp(QWidget):
             palette.setColor(QPalette.ToolTipText, style_settings["light_palette"]["text"])
 
         QApplication.setPalette(palette)
-        # La fuente de QApplication ya se establece en el main, no es necesario aquí.
 
     def setup_ui(self):
         """Configura la interfaz de usuario de la ventana principal."""
         self.setWindowTitle("WineProton Manager")
         self.resize(self.config_manager.get_window_size())
-        self.setWindowIcon(QIcon.fromTheme("wine")) # Icono desde el tema del sistema
+        self.setWindowIcon(QIcon.fromTheme("wine")) 
 
         main_layout = QVBoxLayout(self)
         scroll = QScrollArea()
@@ -138,8 +97,8 @@ class InstallerApp(QWidget):
         content = QWidget()
         content_layout = QHBoxLayout(content)
 
-        content_layout.addWidget(self.create_left_panel(), 1) # Panel izquierdo, más pequeño
-        content_layout.addWidget(self.create_right_panel(), 2) # Panel derecho, más grande
+        content_layout.addWidget(self.create_left_panel(), 1) 
+        content_layout.addWidget(self.create_right_panel(), 2) 
         scroll.setWidget(content)
         main_layout.addWidget(scroll)
 
@@ -153,7 +112,7 @@ class InstallerApp(QWidget):
         config_layout = QVBoxLayout()
         self.lbl_config = QLabel()
         self.lbl_config.setWordWrap(True)
-        self.update_config_info() # Cargar info al inicio
+        self.update_config_info() 
 
         self.btn_manage_environments = QPushButton("Gestionar Entornos")
         self.btn_manage_environments.setAutoDefault(False)
@@ -212,12 +171,12 @@ class InstallerApp(QWidget):
         self.btn_install = QPushButton("Iniciar Instalación")
         self.btn_install.setAutoDefault(False)
         self.btn_install.clicked.connect(self.start_installation)
-        self.btn_install.setEnabled(False) # Deshabilitado hasta que haya ítems
+        self.btn_install.setEnabled(False) 
 
         self.btn_cancel = QPushButton("Cancelar Instalación")
         self.btn_cancel.setAutoDefault(False)
         self.btn_cancel.clicked.connect(self.cancel_installation)
-        self.btn_cancel.setEnabled(False) # Deshabilitado hasta que haya una instalación en curso
+        self.btn_cancel.setEnabled(False) 
 
         actions_layout.addWidget(self.btn_install)
         actions_layout.addWidget(self.btn_cancel)
@@ -263,19 +222,24 @@ class InstallerApp(QWidget):
         tools_group.setLayout(tools_layout)
         actions_layout.addWidget(tools_group)
 
-        actions_layout.addStretch() # Empujar los elementos hacia arriba
+        actions_layout.addStretch() 
         actions_group.setLayout(actions_layout)
         layout.addWidget(actions_group)
 
         return panel
 
     def create_right_panel(self) -> QWidget:
-        """Crea y devuelve el panel derecho (lista de instalación)."""
+        """Crea el panel derecho con pestañas para la lista de instalación y juegos de Steam."""
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
-        self.lbl_status = QLabel("Lista de elementos a instalar:")
-        layout.addWidget(self.lbl_status)
+        self.right_tabs = QTabWidget()
+        self.config_manager.apply_breeze_style_to_widget(self.right_tabs)
+
+        # Pestaña 1: Lista de Instalación (con nuevo diseño de QGroupBox)
+        install_group_box = QGroupBox("Lista de Elementos a Instalar")
+        install_layout = QVBoxLayout(install_group_box)
+        install_layout.setContentsMargins(10, 10, 10, 10)
 
         self.items_table = QTableWidget()
         self.items_table.setColumnCount(4)
@@ -284,11 +248,11 @@ class InstallerApp(QWidget):
         self.items_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.items_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.items_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.items_table.verticalHeader().setVisible(False) # Ocultar los números de fila
-        self.items_table.setSelectionBehavior(QTableWidget.SelectRows) # Seleccionar filas completas
-        self.items_table.setSelectionMode(QTableWidget.SingleSelection) # Permitir solo una selección para mover
-        self.items_table.itemChanged.connect(self.on_table_item_changed) # Conectar para manejar el checkbox
-        layout.addWidget(self.items_table)
+        self.items_table.verticalHeader().setVisible(False)
+        self.items_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.items_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.items_table.itemChanged.connect(self.on_table_item_changed)
+        install_layout.addWidget(self.items_table)
 
         btn_layout = QHBoxLayout()
         self.btn_clear_list = QPushButton("Limpiar Lista")
@@ -310,14 +274,551 @@ class InstallerApp(QWidget):
         self.btn_move_down.setAutoDefault(False)
         self.btn_move_down.clicked.connect(self.move_item_down)
         btn_layout.addWidget(self.btn_move_down)
+        install_layout.addLayout(btn_layout)
+        
+        install_tab_page = QWidget()
+        install_page_layout = QVBoxLayout(install_tab_page)
+        install_page_layout.setContentsMargins(10, 10, 10, 10)
+        install_page_layout.addWidget(install_group_box)
 
-        layout.addLayout(btn_layout)
+        # --- Pestaña 2: Juegos de Steam ---
+        steam_tab_page = QWidget()
+        steam_page_layout = QVBoxLayout(steam_tab_page)
+        steam_page_layout.setContentsMargins(10, 10, 10, 10)
+
+        steam_group_box = self.create_steam_games_panel()
+        steam_page_layout.addWidget(steam_group_box)
+
+        self.right_tabs.addTab(install_tab_page, "Lista de Instalación")
+        self.right_tabs.addTab(steam_tab_page, "Juegos de Steam")
+
+        layout.addWidget(self.right_tabs)
         return panel
+
+    def _convert_to_unsigned(self, signed_id: int) -> int:
+        """Convierte un AppID de 32 bits con signo a su equivalente positivo."""
+        return signed_id & 0xffffffff
+
+    def create_steam_games_panel(self) -> QWidget:
+        """
+        Crea el panel de Juegos de Steam, con la columna APPID oculta,
+        botón para aplicar cambios y sin números de fila.
+        """
+        panel_group = QGroupBox("Juegos de Steam Detectados")
+        layout = QVBoxLayout(panel_group)
+        layout.setContentsMargins(10, 5, 10, 10)
+        
+        top_button_layout = QHBoxLayout()
+        self.btn_load_steam_games = QPushButton("Cargar Juegos de Steam")
+        self.btn_load_steam_games.setAutoDefault(False)
+        self.btn_load_steam_games.clicked.connect(self._load_steam_games)
+        top_button_layout.addWidget(self.btn_load_steam_games)
+
+        self.btn_apply_steam_changes = QPushButton("Aplicar Cambios de Proton")
+        self.btn_apply_steam_changes.setAutoDefault(False)
+        self.btn_apply_steam_changes.clicked.connect(self._apply_steam_proton_changes)
+        self.btn_apply_steam_changes.setEnabled(False) 
+        top_button_layout.addWidget(self.btn_apply_steam_changes)
+        layout.addLayout(top_button_layout)
+
+        self.steam_status_label = QLabel("Presiona 'Cargar Juegos de Steam' para empezar.")
+        self.steam_status_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.steam_status_label)
+
+        self.steam_games_table = QTableWidget()
+        self.steam_games_table.setColumnCount(4)
+
+        self.steam_games_table.setHorizontalHeaderLabels(["Juego", "APPID", "Versión de Proton", "ProtonDB"])
+        self.steam_games_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.steam_games_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.steam_games_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.steam_games_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.steam_games_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.steam_games_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        
+        self.steam_games_table.verticalHeader().setVisible(False)
+        
+        layout.addWidget(self.steam_games_table)
+
+        self.config_manager.apply_breeze_style_to_widget(panel_group)
+
+        return panel_group
+
+    def _apply_steam_proton_changes(self):
+        """
+        Recopila los cambios de versión de Proton, pide confirmación,
+        cierra Steam, aplica los cambios y fuerza el reinicio de Steam.
+        """
+        if not self.steam_root:
+            QMessageBox.critical(self, "Error", "No se puede aplicar cambios, el directorio de Steam no fue encontrado.")
+            return
+
+        changes_to_apply = {}
+        for row in range(self.steam_games_table.rowCount()):
+
+            combo_box = self.steam_games_table.cellWidget(row, 2)
+            appid = combo_box.property("appid")
+
+            original_tool = self.steam_games_data.get(appid, {}).get('original_tool')
+            current_tool = combo_box.currentText()
+
+            if original_tool != current_tool:
+                game_name = self.steam_games_table.item(row, 0).text()
+                changes_to_apply[appid] = {
+                    "name": game_name,
+                    "new_tool": current_tool,
+                    "old_tool": original_tool
+                }
+
+        if not changes_to_apply:
+            QMessageBox.information(self, "Sin Cambios", "No se han detectado cambios en las versiones de Proton seleccionadas.")
+            return
+
+        summary_text = f"Se van a aplicar {len(changes_to_apply)} cambio(s) en la configuración de Proton."
+
+        confirm_dialog = QMessageBox(self)
+        confirm_dialog.setWindowTitle("Confirmar Cambios de Proton")
+        confirm_dialog.setText("<b>¡Atención!</b> Para aplicar estos cambios, es necesario cerrar Steam.")
+        confirm_dialog.setInformativeText(summary_text)
+        confirm_dialog.setIcon(QMessageBox.Warning)
+
+        btn_proceed = confirm_dialog.addButton("Cerrar Steam y Continuar", QMessageBox.AcceptRole)
+        btn_cancel = confirm_dialog.addButton("Cancelar", QMessageBox.RejectRole)
+        confirm_dialog.setDefaultButton(btn_proceed)
+        self.config_manager.apply_breeze_style_to_widget(confirm_dialog)
+        confirm_dialog.exec_()
+
+        if confirm_dialog.clickedButton() == btn_cancel:
+            QMessageBox.information(self, "Cancelado", "La operación ha sido cancelada.")
+            return
+
+        wait_dialog = QMessageBox(self)
+        wait_dialog.setWindowTitle("Esperando Cierre de Steam")
+        wait_dialog.setIcon(QMessageBox.Information)
+
+        try:
+            subprocess.Popen(["steam", "-shutdown"])
+            wait_dialog.setText("Se ha enviado la orden de cierre a Steam.\n\n"
+                        "Por favor, espera a que Steam se cierre por completo.")
+        except FileNotFoundError:
+            wait_dialog.setText("No se pudo enviar la orden de cierre automática.\n\n"
+                        "Por favor, cierra Steam manualmente.")
+
+        wait_dialog.setInformativeText("Una vez que el icono de Steam desaparezca, presiona 'Aplicar Cambios' para continuar.")
+        wait_dialog.addButton("Aplicar Cambios", QMessageBox.AcceptRole)
+        self.config_manager.apply_breeze_style_to_widget(wait_dialog)
+        wait_dialog.exec_()
+
+        all_success = True
+        for appid, change in changes_to_apply.items():
+            if not self._save_steam_config(appid, change["new_tool"]):
+                QMessageBox.critical(self, "Error al Guardar", f"No se pudo guardar la configuración para el juego {change['name']}. Se ha restaurado un backup del archivo de configuración.")
+                all_success = False
+                break
+
+        if all_success:
+            QMessageBox.information(self, "Cambios Aplicados", "¡Éxito! Los cambios han sido aplicados.\n\nSe intentará reiniciar Steam ahora.")
+
+            try:
+                subprocess.Popen(["steam"])
+            except FileNotFoundError:
+                QMessageBox.warning(self, "Error al reiniciar", "No se pudo reiniciar Steam automáticamente. Por favor, inícialo manually.")
+
+            self._load_steam_games()
+        else:
+            self._load_steam_games()
+
+    def _locate_steam_root(self) -> Path | None:
+        """
+        Localiza el directorio raíz de Steam, dando prioridad a la ruta guardada en la configuración.
+        Si no hay una ruta configurada o no es válida, recurre a la detección automática.
+        """
+        # Intentar con la ruta de la configuración
+        configured_path_str = self.config_manager.get_steam_root_path()
+        if configured_path_str:
+            configured_path = Path(configured_path_str)
+            # Validar que la ruta parece correcta (existe y tiene la carpeta steamapps)
+            if configured_path.is_dir() and (configured_path / "steamapps").exists():
+                print(f"Usando ruta de Steam configurada: {configured_path}")
+                return configured_path
+
+        # Si falla lo anterior, usar la detección automática 
+        home = Path.home()
+        possible_paths = [
+            home / ".steam/steam",
+            home / ".local/share/Steam",
+            home / ".steam/root"
+        ]
+        for path in possible_paths:
+            if path.exists() and (path / "steamapps").exists():
+                print(f"Ruta de Steam detectada automáticamente: {path}")
+                return path
+        
+        print("No se pudo encontrar la ruta de Steam.")
+        return None
+            
+    def _get_available_proton_versions(self) -> list[str]:
+        """
+        Obtiene la lista de TODAS las herramientas de compatibilidad de Proton disponibles:
+        - Versiones personalizadas (GE-Proton) desde 'compatibilitytools.d'.
+        - Versiones oficiales de Steam (Proton 8.0, Experimental, etc.) desde los manifiestos.
+        """
+        if self.available_proton_versions:
+            return self.available_proton_versions
+        if not self.steam_root:
+            return []
+
+        # Usamos un set para manejar automáticamente los duplicados
+        versions = {"default"}
+
+        # Buscar versiones personalizadas (como GE-Proton)
+        compat_dir = self.steam_root / "compatibilitytools.d"
+        if compat_dir.exists():
+            for entry in compat_dir.iterdir():
+                if entry.is_dir() and (entry / "toolmanifest.vdf").exists():
+                    versions.add(entry.name)
+
+        # Buscar versiones oficiales de Steam
+        library_folders_vdf_path = self.steam_root / "steamapps/libraryfolders.vdf"
+        lib_paths = {self.steam_root} 
+        if library_folders_vdf_path.exists():
+            try:
+                with open(library_folders_vdf_path, 'r', encoding='utf-8') as f:
+                    lib_folders_data = vdf.load(f)
+                for lib_info in lib_folders_data.get("libraryfolders", {}).values():
+                    if "path" in lib_info and Path(lib_info["path"]).exists():
+                        lib_paths.add(Path(lib_info["path"]))
+            except Exception as e:
+                print(f"Advertencia: No se pudo parsear libraryfolders.vdf: {e}")
+
+        for lib_path in lib_paths:
+            steamapps_path = lib_path / "steamapps"
+            if not steamapps_path.exists():
+                continue
+
+            for acf_file in steamapps_path.glob("appmanifest_*.acf"):
+                try:
+                    with open(acf_file, 'r', encoding='utf-8') as f:
+                        app_data = vdf.load(f).get("AppState", {})
+                    
+                    name = app_data.get("name")
+                    if name and "proton" in name.lower():
+                        versions.add(name)
+                except Exception:
+                    continue
+        
+        # Ordenar la lista de forma "natural" para que las versiones aparezcan correctamente
+        sorted_versions = sorted(list(versions), key=lambda s: [int(t) if t.isdigit() else t.lower() for t in re.split('([0-9]+)', s)], reverse=True)
+
+        if 'default' in sorted_versions:
+            sorted_versions.remove('default')
+            sorted_versions.append('default')
+
+        self.available_proton_versions = sorted_versions
+        return self.available_proton_versions
+
+    def _load_steam_games(self):
+        """Orquesta la carga de juegos de Steam y Non-Steam en la tabla."""
+        self.btn_load_steam_games.setEnabled(False)
+        self.btn_load_steam_games.setText("Cargando...")
+        self.btn_apply_steam_changes.setEnabled(False)
+        QTimer.singleShot(100, self._execute_steam_games_load) # Ejecutar la carga tras actualizar la UI
+
+    def _execute_steam_games_load(self):
+        """Realiza la carga real de los juegos de Steam."""
+        if not self.steam_root:
+            QMessageBox.warning(self, "Steam no encontrado", "No se pudo localizar el directorio raíz de Steam.")
+            self.steam_status_label.setText("Error: Directorio raíz de Steam no encontrado.")
+            self.btn_load_steam_games.setText("Cargar Juegos de Steam")
+            self.btn_load_steam_games.setEnabled(True)
+            return
+
+        self.steam_status_label.setText("Buscando juegos en bibliotecas de Steam...")
+        self.steam_games_table.setRowCount(0)
+        self.steam_games_data.clear()
+        processed_appids = set()
+
+        try:
+            compat_tools_config, global_tool, lib_paths = self._get_steam_config_data()
+
+            for lib_path in lib_paths:
+                self._process_steam_library(lib_path, compat_tools_config, global_tool, processed_appids)
+
+            self._process_non_steam_games(compat_tools_config, global_tool, processed_appids)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error al leer archivos de Steam", f"Ocurrió un error general:\n{e}")
+
+        game_count = self.steam_games_table.rowCount()
+        self.steam_status_label.setText(f"Búsqueda completada. {game_count} juegos encontrados.")
+        self.btn_apply_steam_changes.setEnabled(game_count > 0)
+        self.btn_load_steam_games.setText("Cargar Juegos de Steam")
+        self.btn_load_steam_games.setEnabled(True)
+
+    def _get_steam_config_data(self) -> tuple[dict, str | None, set]:
+        """Lee y parsea los archivos de configuración de Steam para obtener datos necesarios."""
+        config_path = self.steam_root / "config/config.vdf"
+        compat_tools_config = {}
+        global_default_tool = None
+        if config_path.exists():
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config_data = vdf.load(f)
+            steam_section = config_data.get("InstallConfigStore", {}).get("Software", {}).get("Valve", {}).get("Steam", {})
+            compat_tools_config = steam_section.get("CompatToolMapping", {})
+            global_default_tool = steam_section.get("DefaultCompatTool")
+
+        lib_paths = {self.steam_root}
+        library_folders_path = self.steam_root / "steamapps/libraryfolders.vdf"
+        if library_folders_path.exists():
+            with open(library_folders_path, 'r', encoding='utf-8') as f:
+                lib_folders_data = vdf.load(f)
+            for lib_info in lib_folders_data.get("libraryfolders", {}).values():
+                if "path" in lib_info and Path(lib_info["path"]).exists():
+                    lib_paths.add(Path(lib_info["path"]))
+        return compat_tools_config, global_default_tool, lib_paths
+
+    def _process_steam_library(self, lib_path: Path, compat_config: dict, global_tool: str | None, processed_appids: set):
+        """Procesa una única biblioteca de Steam, buscando juegos en archivos .acf."""
+        steamapps_path = lib_path / "steamapps"
+        if not steamapps_path.exists(): return
+        
+        TOOL_KEYWORDS = ["runtime", "sdk", "redist", "proton", "steamworks"]
+        for acf_file in steamapps_path.glob("appmanifest_*.acf"):
+            try:
+                with open(acf_file, 'r', encoding='utf-8') as f:
+                    game_data = vdf.load(f).get("AppState", {})
+                
+                appid = game_data.get("appid")
+                name = game_data.get("name")
+                
+                if not all([appid, name]) or appid in processed_appids or any(k in name.lower() for k in TOOL_KEYWORDS):
+                    continue
+
+                processed_appids.add(appid)
+                tool_info = compat_config.get(appid, {})
+                tool_name = tool_info.get("name", global_tool or "Nativo/No Proton")
+                self._add_game_to_table(appid, name, tool_name, tool_name, is_steam_game=True)
+            except Exception:
+                continue
+
+    def _process_non_steam_games(self, compat_config: dict, global_tool: str | None, processed_appids: set):
+        """Procesa los juegos Non-Steam desde los archivos shortcuts.vdf."""
+        userdata_root = self.steam_root / "userdata"
+        if not userdata_root.exists(): return
+
+        for user_folder in (d for d in userdata_root.iterdir() if d.is_dir() and d.name != "0"):
+            shortcuts_path = user_folder / "config/shortcuts.vdf"
+            if not shortcuts_path.exists(): continue
+            
+            with open(shortcuts_path, "rb") as f:
+                shortcuts_data = vdf.binary_load(f)
+
+            for entry_data in shortcuts_data.get('shortcuts', {}).values():
+                app_name = entry_data.get('AppName')
+                signed_appid = entry_data.get('appid')
+                if not app_name or signed_appid is None: continue
+
+                unsigned_appid = str(self._convert_to_unsigned(signed_appid))
+                if unsigned_appid in processed_appids: continue
+
+                processed_appids.add(unsigned_appid)
+                tool_info = compat_config.get(unsigned_appid, {})
+                
+                tool_name = tool_info.get("name", global_tool or "Predeterminado de Steam")
+
+                tooltip = f"{app_name}\nRuta: {entry_data.get('Exe', 'N/A')}"
+                self._add_game_to_table(unsigned_appid, app_name, tool_name, tool_name, tooltip, is_steam_game=False)
+
+    def _add_game_to_table(self, appid: str, name: str, compat_tool: str, original_tool: str, tooltip: str = "", is_steam_game: bool = True):
+        """Añade una fila a la tabla de juegos de Steam."""
+        self.steam_games_data[appid] = {'name': name, 'compat_tool': compat_tool, 'original_tool': original_tool}
+        row = self.steam_games_table.rowCount()
+        self.steam_games_table.insertRow(row)
+
+        name_item = QTableWidgetItem(name)
+        name_item.setToolTip(tooltip or name)
+        self.steam_games_table.setItem(row, 0, name_item)
+        self.steam_games_table.setItem(row, 1, QTableWidgetItem(appid))
+
+        combo_proton = QComboBox()
+        versions = self._get_available_proton_versions()
+        if compat_tool not in versions:
+            combo_proton.insertItem(0, compat_tool)
+        combo_proton.addItems(versions)
+        combo_proton.setCurrentText(compat_tool)
+        combo_proton.setProperty("appid", appid)
+        self.steam_games_table.setCellWidget(row, 2, combo_proton)
+
+        status_text = "Cargando..." if is_steam_game else "No aplicable"
+        db_status_item = QTableWidgetItem(status_text)
+        self.steam_games_table.setItem(row, 3, db_status_item)
+
+        if is_steam_game:
+            thread = ProtonDBThread(appid)
+            thread.db_status_ready.connect(self._update_protondb_rating)
+            thread.finished.connect(lambda t=thread: self.worker_threads.remove(t))
+            self.worker_threads.append(thread)
+            thread.start()
+        
+    def _update_protondb_rating(self, appid: str, rating: str):
+        """
+        Actualiza la celda de estado de ProtonDB y le aplica un color según la calificación.
+        """
+        # Mapa de calificaciones a colores ---
+        tier_colors = {
+            "platinum": QColor("#89cff0"),  # 💎 Azul claro (Platino)
+            "gold": QColor("#FFD700"),      # 🟡 Dorado
+            "silver": QColor("#C0C0C0"),    # ⚪️ Plata
+            "bronze": QColor("#CD7F32"),    # 🥉 Bronce
+            "borked": QColor("#E34234"),    # 🔴 Rojo (Roto)
+            "native": QColor("#7CFC00"),    # 🟢 Verde lima (Nativo)
+        }
+
+        for row in range(self.steam_games_table.rowCount()):
+            # Buscamos la fila correcta comparando el APPID
+            if self.steam_games_table.item(row, 1).text() == appid:
+                status_item = self.steam_games_table.item(row, 3)
+                if status_item:
+                    # Ponemos el texto de la calificación (ej. "Gold")
+                    status_item.setText(rating)
+                    
+                    # Buscamos el color en nuestro diccionario (en minúsculas para asegurar la coincidencia)
+                    color = tier_colors.get(rating.lower())
+                    
+                    if color:
+                        # Si encontramos un color, lo aplicamos al texto de la celda
+                        status_item.setForeground(color)
+                break
+
+    def _parse_shortcuts_vdf(self, path):
+        """
+        Lee y decodifica el archivo binario shortcuts.vdf, emulando la lógica
+        de librerías especializadas para obtener una lista de diccionarios.
+        """
+        shortcuts = []
+        with open(path, 'rb') as f:
+            content = f.read()
+
+        import re
+        # Buscamos patrones de 'AppName' seguido de su valor y luego 'exe' seguido del suyo
+        pattern = re.compile(
+            b'\x01AppName\x00(.*?)\x00'  # Captura el nombre de la app
+            b'.*?'                     # Caracteres intermedios
+            b'\x01exe\x00(.*?)\x00',    # Captura la ruta del ejecutable
+            re.DOTALL                  # Permite que '.' incluya saltos de línea
+        )
+
+        matches = pattern.findall(content)
+
+        for appname_bytes, exe_bytes in matches:
+            try:
+                entry = {
+                    'appname': appname_bytes.decode('utf-8'),
+                    'exe': exe_bytes.decode('utf-8')
+                }
+                shortcuts.append(entry)
+            except UnicodeDecodeError:
+                continue
+
+        return shortcuts
+
+    def _update_steam_game_proton_version(self, new_tool_name: str):
+        """Se activa cuando el usuario cambia la versión de Proton en un ComboBox."""
+        sender_combo = self.sender()
+        appid = sender_combo.property("appid")
+        if not appid: return
+
+        reply = QMessageBox.question(self, "Confirmar Cambio",
+                                     f"¿Estás seguro de que quieres cambiar la versión de Proton para el juego con APPID {appid} a '{new_tool_name}'?\n"
+                                     "Esto modificará tu archivo de configuración de Steam.",
+                                     QMessageBox.Yes | QMessageBox.No)
+
+        if reply == QMessageBox.Yes:
+            if self._save_steam_config(appid, new_tool_name):
+                QMessageBox.information(self, "Éxito", "La versión de Proton se ha actualizado. Puede que necesites reiniciar Steam para que el cambio surta efecto.")
+            else:
+                QMessageBox.critical(self, "Error", "No se pudo guardar la configuración de Steam. Se ha restaurado un backup.")
+                self._load_steam_games()
+
+    def _vdf_to_dict(self, vdf_text: str) -> dict:
+        """
+        Parser manual y flexible para leer archivos VDF que no son estricos,
+        como los appmanifest.acf.
+        """
+        root = {}
+        stack = [root]
+        pattern = re.compile(r'"([^"]+)"\s*(?:"([^"]+)")?')
+
+        for line in vdf_text.splitlines():
+            line = line.split('//')[0].strip()
+            if not line: continue
+            if line == '{': continue
+            if line == '}':
+                if len(stack) > 1: stack.pop()
+                continue
+
+            match = pattern.search(line)
+            if match:
+                key, value = match.groups()
+                current_dict = stack[-1]
+
+                if value is not None:
+                    current_dict[key] = value
+                else:
+                    new_dict = {}
+                    current_dict[key] = new_dict
+                    stack.append(new_dict)
+        return root
+
+    def _save_steam_config(self, appid: str, new_tool_name: str) -> bool:
+        """
+        Versión final que utiliza 'vdf' para guardar la configuración de forma segura.
+        """
+        if not self.steam_root: return False
+
+        config_path = self.steam_root / "config/config.vdf"
+        backup_path = self.steam_root / "config/config.vdf.wpm_backup"
+        if not config_path.exists(): return False
+
+        try:
+            shutil.copy(config_path, backup_path)
+
+            # Leer y parsear el archivo con vdf.load()
+            full_config_data = {}
+            with open(config_path, 'r', encoding='utf-8') as f:
+                full_config_data = vdf.load(f)
+
+            # Navegar y modificar el diccionario en memoria
+            compat_mapping = full_config_data \
+                .setdefault("InstallConfigStore", {}) \
+                .setdefault("Software", {}) \
+                .setdefault("Valve", {}) \
+                .setdefault("Steam", {}) \
+                .setdefault("CompatToolMapping", {})
+
+            current_game_mapping = compat_mapping.setdefault(appid, {})
+            current_game_mapping["name"] = new_tool_name
+            current_game_mapping.setdefault("config", "")
+
+            # Guardar el diccionario modificado con vdf.dump()
+            with open(config_path, 'w', encoding='utf-8') as f:
+                vdf.dump(full_config_data, f, pretty=True)
+
+            self.steam_compat_tools_config = compat_mapping
+            return True
+
+        except Exception as e:
+            print(f"Error guardando config.vdf: {e}")
+            if backup_path.exists():
+                shutil.move(str(backup_path), str(config_path))
+            return False
+        finally:
+            if backup_path.exists():
+                backup_path.unlink(missing_ok=True)
 
     def on_table_item_changed(self, item: QTableWidgetItem):
         """Maneja los cambios en las casillas de verificación de la tabla y actualiza el estado interno.
-           MODIFICACIÓN 1: Al volver a tildar un programa, se restablece a "Pendiente"."""
-        # Desconectar temporalmente para evitar llamadas recursivas
+           Al volver a tildar un programa, se restablece a "Pendiente"."""
         try:
             self.items_table.itemChanged.disconnect(self.on_table_item_changed)
         except TypeError:
@@ -372,6 +873,20 @@ class InstallerApp(QWidget):
         QApplication.quit()
         QProcess.startDetached(sys.executable, sys.argv)
 
+    def backup_prompt_wrapper(func):
+        """
+        Decorador para gestionar la lógica de "preguntar por backup" antes de ejecutar una acción
+        sobre el prefijo.
+        """
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            # 'self' es la instancia de InstallerApp
+            if self.config_manager.get_ask_for_backup_before_action():
+                # Pasa la función original (vinculada a la instancia) como el callback
+                self.prompt_for_backup(lambda: func(self, *args, **kwargs))
+            else:
+                func(self, *args, **kwargs) # Ejecuta la función directamente si la opción está desactivada
+        return wrapper
 
     def update_config_info(self):
         """Actualiza la información del entorno actual en la GUI."""
@@ -404,7 +919,7 @@ class InstallerApp(QWidget):
                     text.append(f"<b>Prefijo gestionado por Steam:</b> Sí")
                 else:
                     text.append(f"<b>Prefijo personalizado:</b> Sí")
-            else: # Tipo Wine
+            else:
                 wine_dir = config.get('wine_dir', 'Sistema (PATH)')
                 text.extend([
                     f"<b>Directorio de Wine:</b> {wine_dir}"
@@ -449,7 +964,7 @@ class InstallerApp(QWidget):
                     already_registered = True
                 elif program_info["type"] == "exe":
                     exe_filename = Path(program_info["path"]).name
-                    # La lógica de detección de EXE instalado es básica; podría mejorarse con hashes o nombres más robustos.
+
                     # Aquí asume que si el nombre del ejecutable está en el .ini, ya está "instalado".
                     if exe_filename in installed_items:
                         already_registered = True
@@ -795,7 +1310,7 @@ class InstallerApp(QWidget):
 
         # Botones de instalación
         self.btn_install.setEnabled(any_checked and not is_installer_running and not is_backup_running)
-        # MODIFICACIÓN 1: El botón de cancelar siempre está habilitado si la instalación está en curso
+        # El botón de cancelar siempre está habilitado si la instalación está en curso
         self.btn_cancel.setEnabled(is_installer_running)
 
         can_modify_list = not is_installer_running and not is_backup_running
@@ -885,7 +1400,7 @@ class InstallerApp(QWidget):
                     QMessageBox.critical(self, "Error", f"No se pudo crear el prefijo:\n{str(e)}")
                     return
             else:
-                return # No continuar si el usuario no quiere crear el prefijo
+                return
 
         try:
             env = self.config_manager.get_current_environment(current_config_name)
@@ -893,7 +1408,6 @@ class InstallerApp(QWidget):
             QMessageBox.critical(self, "Error de Entorno", f"No se pudo configurar el entorno para la instalación:\n{str(e)}")
             return
 
-        # Mostrar diálogo de progreso de instalación
         first_item_name_for_dialog = items_to_process_data_for_thread[0][2] if items_to_process_data_for_thread else "elementos"
         self.installation_progress_dialog = InstallationProgressDialog(first_item_name_for_dialog, self.config_manager, self)
 
@@ -904,22 +1418,20 @@ class InstallerApp(QWidget):
             silent_mode=self.silent_mode,
             force_mode=self.force_mode,
             winetricks_path=self.config_manager.get_winetricks_path(),
-            config_manager=self.config_manager
+            config_manager=self.config_manager,
+            config_name=current_config_name 
         )
 
         # Conectar señales del hilo a slots de la UI
         self.installer_thread.progress.connect(self.update_progress)
         self.installer_thread.finished.connect(self.installation_finished)
-        # [MODIFICACIÓN 1] Manejar errores de ítems individualmente, y errores fatales globales.
-        self.installer_thread.error.connect(self.show_global_installation_error) # Para errores que detienen todo
-        self.installer_thread.item_error.connect(self.show_item_installation_error) # Para errores de ítems que continúan
+        self.installer_thread.error.connect(self.show_global_installation_error)
+        self.installer_thread.item_error.connect(self.show_item_installation_error)
         self.installer_thread.canceled.connect(self.on_installation_canceled)
         self.installer_thread.console_output.connect(self.installation_progress_dialog.append_log)
 
-        # Deshabilitar botones que modifican la lista o inician nueva instalación
         self.update_installation_button_state()
 
-        # Deshabilitar interacción con checkboxes de la tabla durante la instalación
         try:
             self.items_table.itemChanged.disconnect(self.on_table_item_changed)
         except TypeError:
@@ -928,14 +1440,12 @@ class InstallerApp(QWidget):
             checkbox_item = self.items_table.item(row, 0)
             if checkbox_item:
                 checkbox_item.setFlags(checkbox_item.flags() & ~Qt.ItemIsUserCheckable & ~Qt.ItemIsEnabled)
-                # Cambiar estado visual del primer ítem a "Instalando" si es Pendiente
                 if self.items_for_installation[row]['current_status'] == "Pendiente":
                     self.items_table.item(row, 3).setText("Instalando")
                     self.items_for_installation[row]['current_status'] = "Instalando"
                     self.items_table.item(row, 3).setForeground(QColor("blue"))
         self.items_table.itemChanged.connect(self.on_table_item_changed)
 
-        # MODIFICACIÓN 1: Mostrar el diálogo de progreso después de configurar todo, no bloquear la UI principal
         self.installation_progress_dialog.show()
         self.installer_thread.start()
 
@@ -1059,7 +1569,7 @@ class InstallerApp(QWidget):
 
     def installation_finished(self):
         """
-        MODIFICACIÓN 1: Maneja el estado final de la instalación, actualizando la GUI y mostrando un resumen.
+        Maneja el estado final de la instalación, actualizando la GUI y mostrando un resumen.
         Limpia la lista de selección, pero mantiene los estados de los ítems.
         Los ítems "Finalizado" y "Omitido" se desmarcan. Los "Error" o "Cancelado" se mantienen marcados.
         """
@@ -1117,7 +1627,7 @@ class InstallerApp(QWidget):
             f"• Instalado exitosamente: {installed_count}\n"
             f"• Fallido o Cancelado: {failed_count}\n"
             f"• Omitido (no seleccionado inicialmente): {skipped_count}\n\n"
-            f"Los elementos se han desmarcado o dejado marcados según el resultado." # Mensaje actualizado
+            f"Los elementos se han desmarcado o dejado marcados según el resultado."
         )
         self.installer_thread = None # Asegurarse de limpiar la referencia al hilo
 
@@ -1144,7 +1654,7 @@ class InstallerApp(QWidget):
         self.installer_thread = None # Asegurarse de limpiar la referencia al hilo
 
     def show_item_installation_error(self, item_name: str, error_message: str):
-        """[MODIFICACIÓN 1] Maneja errores de ítems individuales (la instalación continúa)."""
+        """Maneja errores de ítems individuales (la instalación continúa)."""
         if self.installation_progress_dialog:
             self.installation_progress_dialog.append_log(f"ERROR para '{item_name}': {error_message}")
             # El diálogo de progreso principal seguirá mostrando "Instalando [siguiente item]"
@@ -1164,7 +1674,7 @@ class InstallerApp(QWidget):
             return base_backup_path_for_config / f"{source_to_backup.name}_backup_{timestamp}"
         else:
             # Para backup incremental, el destino es la última ruta de backup completo guardada para *esta* configuración.
-            last_full_backup_path_str = self.config_manager.get_last_full_backup_path(current_config_name) # MODIFICACIÓN: Pasar config_name
+            last_full_backup_path_str = self.config_manager.get_last_full_backup_path(current_config_name)
             if last_full_backup_path_str and Path(last_full_backup_path_str).is_dir():
                 return Path(last_full_backup_path_str)
             return None # Indicar que no hay un backup completo previo para incremental para esta configuración
@@ -1268,14 +1778,14 @@ class InstallerApp(QWidget):
                                     "Por favor, realiza un 'Backup Completo (Nuevo)' primero o selecciona 'No hacer Backup y Continuar'.")
                 callback_func() # Continuar con la acción original si el rsync no es posible
                 return
-            self._start_backup_process(source_to_backup, destination_path, is_full_backup=False, config_name=current_config_name, prompt_callback=callback_func) # MODIFICACIÓN: Pasar config_name
+            self._start_backup_process(source_to_backup, destination_path, is_full_backup=False, config_name=current_config_name, prompt_callback=callback_func) 
         elif clicked_button == btn_full_backup:
             destination_path = self._get_backup_destination_path(current_config_name, source_to_backup, is_full_backup=True)
-            self._start_backup_process(source_to_backup, destination_path, is_full_backup=True, config_name=current_config_name, prompt_callback=callback_func) # MODIFICACIÓN: Pasar config_name
+            self._start_backup_process(source_to_backup, destination_path, is_full_backup=True, config_name=current_config_name, prompt_callback=callback_func) 
         elif clicked_button == btn_no_backup:
             callback_func() # Continuar con la operación original sin backup
 
-    def _start_backup_process(self, source_to_backup: Path, destination_path: Path, is_full_backup: bool, config_name: str, prompt_callback=None): # MODIFICACIÓN: Añadir config_name
+    def _start_backup_process(self, source_to_backup: Path, destination_path: Path, is_full_backup: bool, config_name: str, prompt_callback=None): 
         """Método auxiliar para iniciar el hilo de backup."""
         self.backup_progress_dialog = QProgressDialog("Preparando backup...", "", 0, 100, self)
         self.backup_progress_dialog.setWindowTitle("Progreso del Backup")
@@ -1286,18 +1796,18 @@ class InstallerApp(QWidget):
         self.config_manager.apply_breeze_style_to_widget(self.backup_progress_dialog)
         self.backup_progress_dialog.show()
 
-        self.backup_thread = BackupThread(source_to_backup, destination_path, self.config_manager, is_full_backup, config_name) # MODIFICACIÓN: Pasar config_name
+        self.backup_thread = BackupThread(source_to_backup, destination_path, self.config_manager, is_full_backup, config_name)
         self.backup_thread.progress_update.connect(self.update_backup_progress_dialog)
         if prompt_callback:
-            # MODIFICACIÓN: Ajustar el lambda para recibir el nuevo parámetro config_name
+
             self.backup_thread.finished.connect(lambda success, msg, path, current_conf_name: self.on_prompted_backup_finished(success, msg, path, current_conf_name, prompt_callback))
         else:
-            # MODIFICACIÓN: Ajustar el lambda para recibir el nuevo parámetro config_name
+
             self.backup_thread.finished.connect(lambda success, msg, path, current_conf_name: self.on_manual_backup_finished(success, msg, path, current_conf_name))
         self.backup_thread.start()
         self.update_installation_button_state()
 
-    def on_prompted_backup_finished(self, success: bool, message: str, final_backup_path: str, config_name: str, callback_func): # MODIFICACIÓN: Añadir config_name
+    def on_prompted_backup_finished(self, success: bool, message: str, final_backup_path: str, config_name: str, callback_func): 
         """Callback para backups iniciados por un prompt."""
         self.backup_progress_dialog.close()
         self.backup_thread = None
@@ -1320,7 +1830,7 @@ class InstallerApp(QWidget):
         self.backup_progress_dialog.setLabelText(f"Backup en progreso...\n{message}")
         QApplication.processEvents()
 
-    def on_manual_backup_finished(self, success: bool, message: str, final_backup_path: str, config_name: str): # MODIFICACIÓN: Añadir config_name
+    def on_manual_backup_finished(self, success: bool, message: str, final_backup_path: str, config_name: str): 
         """Callback para backups iniciados por el botón manual."""
         self.backup_progress_dialog.close()
         self.backup_thread = None
@@ -1331,51 +1841,28 @@ class InstallerApp(QWidget):
             QMessageBox.critical(self, "Error de Backup", message)
 
     def open_winetricks(self):
-        """Abre la GUI de Winetricks para el prefijo actual."""
-        if self.config_manager.get_ask_for_backup_before_action():
-            self.prompt_for_backup(lambda: self._continue_open_winetricks())
-        else:
-            self._continue_open_winetricks()
-
-    def _continue_open_winetricks(self):
-        """Abre la GUI de Winetricks para el prefijo actual."""
+        """Abre la GUI de Winetricks para el prefijo actual, con manejo de backup."""
         try:
             current_config_name = self.config_manager.configs["last_used"]
             env = self.config_manager.get_current_environment(current_config_name)
             winetricks_path = self.config_manager.get_winetricks_path()
-
-            # Esto se ejecuta en un subproceso no bloqueante
+            
             subprocess.Popen([winetricks_path, "--gui"], env=env,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) # Redirigir salida a DEVNULL
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo abrir Winetricks: {str(e)}")
 
     def open_shell(self):
-        """Abre una terminal (Konsole) con el entorno de Wine/Proton configurado."""
-        if self.config_manager.get_ask_for_backup_before_action():
-            self.prompt_for_backup(lambda: self._continue_open_shell())
-        else:
-            self._continue_open_shell()
-
-    def _continue_open_shell(self):
-        """Continúa abriendo la terminal después de la posible solicitud de backup."""
+        """Abre una terminal con el entorno de Wine/Proton, con manejo de backup."""
         try:
             current_config_name = self.config_manager.configs["last_used"]
             env = self.config_manager.get_current_environment(current_config_name)
-            # Abre Konsole, heredando el entorno. Puede ser 'xterm', 'gnome-terminal', etc.
             subprocess.Popen(["konsole"], env=env)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo abrir la terminal: {str(e)}")
 
     def open_prefix_folder(self):
-        """Abre la carpeta del prefijo de Wine/Proton en el explorador de archivos."""
-        if self.config_manager.get_ask_for_backup_before_action():
-            self.prompt_for_backup(lambda: self._continue_open_prefix_folder())
-        else:
-            self._continue_open_prefix_folder()
-
-    def _continue_open_prefix_folder(self):
-        """Continúa abriendo la carpeta del prefijo después de la posible solicitud de backup."""
+        """Abre la carpeta del prefijo en el explorador de archivos, con manejo de backup."""
         try:
             current_config_name = self.config_manager.configs["last_used"]
             config = self.config_manager.get_config(current_config_name)
@@ -1385,57 +1872,34 @@ class InstallerApp(QWidget):
                 if prefix_path.exists():
                     QDesktopServices.openUrl(QUrl.fromLocalFile(str(prefix_path)))
                 else:
-                    QMessageBox.warning(self, "Advertencia", f"El prefijo '{prefix_path}' no existe. Por favor, asegúrate de que esté configurado o créalo.")
+                    QMessageBox.warning(self, "Advertencia", f"El prefijo '{prefix_path}' no existe.")
             else:
-                QMessageBox.warning(self, "Advertencia", "No hay ningún prefijo configurado para el entorno actual.")
+                QMessageBox.warning(self, "Advertencia", "No hay ningún prefijo configurado.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo abrir la carpeta del prefijo: {str(e)}")
 
     def open_explorer(self):
-        """Ejecuta wine explorer para el prefijo actual."""
-        if self.config_manager.get_ask_for_backup_before_action():
-            self.prompt_for_backup(lambda: self._continue_open_explorer())
-        else:
-            self._continue_open_explorer()
-
-    def _continue_open_explorer(self):
-        """Continúa abriendo el explorador de Wine después de la posible solicitud de backup."""
+        """Ejecuta wine explorer para el prefijo actual, con manejo de backup."""
         try:
             current_config_name = self.config_manager.configs["last_used"]
-            config = self.config_manager.get_config(current_config_name)
+            env = self.config_manager.get_current_environment(current_config_name)
+            wine_executable = env.get("WINE")
 
-            if config and "prefix" in config:
-                prefix_path = Path(config["prefix"])
-                if prefix_path.exists():
-                    env = self.config_manager.get_current_environment(current_config_name)
-                    wine_executable = env.get("WINE")
+            if not wine_executable or not Path(wine_executable).is_file():
+                raise FileNotFoundError(f"Ejecutable de Wine no encontrado en el entorno: {wine_executable}")
 
-                    if not wine_executable or not Path(wine_executable).is_file():
-                        raise FileNotFoundError(f"Ejecutable de Wine no encontrado en el entorno: {wine_executable}")
-
-                    subprocess.Popen([wine_executable, "explorer"], env=env,
+            subprocess.Popen([wine_executable, "explorer"], env=env,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                else:
-                    QMessageBox.warning(self, "Advertencia", f"El prefijo '{prefix_path}' no existe. Por favor, asegúrate de que esté configurado o créalo.")
-            else:
-                QMessageBox.warning(self, "Advertencia", "No hay ningún prefijo configurado para el entorno actual.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo abrir el Explorador de Wine: {str(e)}")
 
     def open_winecfg(self):
-        """Ejecuta winecfg para el prefijo actual."""
-        if self.config_manager.get_ask_for_backup_before_action():
-            self.prompt_for_backup(lambda: self._continue_open_winecfg())
-        else:
-            self._continue_open_winecfg()
-
-    def _continue_open_winecfg(self):
-        """Continúa abriendo winecfg después de la posible solicitud de backup."""
+        """Ejecuta winecfg para el prefijo actual, con manejo de backup."""
         try:
             current_config_name = self.config_manager.configs["last_used"]
             env = self.config_manager.get_current_environment(current_config_name)
-
             wine_executable = env.get("WINE")
+
             if not wine_executable or not Path(wine_executable).is_file():
                 raise FileNotFoundError(f"Ejecutable de Wine no encontrado en el entorno: {wine_executable}")
 

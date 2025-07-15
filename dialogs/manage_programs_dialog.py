@@ -1,22 +1,18 @@
-from pathlib import Path
-import shutil
-
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QHeaderView, QMessageBox, QWidget
-)
+from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QTableWidget, QHeaderView, QHBoxLayout,
+                             QPushButton, QMessageBox, QTableWidgetItem, QWidget)
 from PyQt5.QtCore import Qt
+
 from config_manager import ConfigManager
 
 class ManageProgramsDialog(QDialog):
     def __init__(self, config_manager: ConfigManager, parent: QWidget | None = None):
         super().__init__(parent)
-        self.config_manager = config_manager # Pasar config_manager para aplicar estilos
+        self.config_manager = config_manager 
         self.setWindowTitle("Gestionar Programas Guardados")
         self.setMinimumSize(650, 450)
         self.setup_ui()
         self.config_manager.apply_breeze_style_to_widget(self)
-        self.selected_programs_to_load = [] # Para almacenar programas seleccionados al cargar
+        self.selected_programs_to_load = [] 
 
     def setup_ui(self):
         layout = QVBoxLayout()
@@ -27,9 +23,9 @@ class ManageProgramsDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows) # Seleccionar filas completas
-        self.table.setSelectionMode(QTableWidget.MultiSelection) # Permitir multiselección
-        self.load_programs() # Cargar los programas al iniciar el diálogo
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.MultiSelection) 
+        self.load_programs() 
         layout.addWidget(self.table)
 
         btn_layout = QHBoxLayout()
@@ -53,13 +49,13 @@ class ManageProgramsDialog(QDialog):
 
     def load_programs(self):
         """Carga y muestra la lista de programas personalizados en la tabla."""
-        self.table.setRowCount(0) # Limpiar tabla antes de cargar
+        self.table.setRowCount(0) 
         programs = self.config_manager.get_custom_programs()
         self.table.setRowCount(len(programs))
 
         for row, program in enumerate(programs):
             name_item = QTableWidgetItem(program.get('name', 'N/A'))
-            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable) # No editable
+            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable) 
             self.table.setItem(row, 0, name_item)
 
             path_item = QTableWidgetItem(program.get('path', 'N/A'))
@@ -94,7 +90,6 @@ class ManageProgramsDialog(QDialog):
             program_info = all_programs[row]
             item_already_installed = False
 
-            # Verificar si el programa ya está registrado como instalado en el prefijo
             if program_info["type"] == "winetricks":
                 if program_info["path"] in installed_items_in_prefix:
                     item_already_installed = True
@@ -105,7 +100,7 @@ class ManageProgramsDialog(QDialog):
             elif program_info["type"] == "wtr":
                 wtr_filename = Path(program_info["path"]).name
 
-                if wtr_filename in installed_items_in_prefix: # Esto asume que el nombre del script se registra.
+                if wtr_filename in installed_items_in_prefix: 
                     item_already_installed = True
 
             if item_already_installed:
@@ -113,16 +108,16 @@ class ManageProgramsDialog(QDialog):
                                              f"El programa '{program_info['name']}' ya está registrado como instalado en este prefijo ({current_config_name}). ¿Deseas agregarlo a la lista de instalación de todos modos?",
                                              QMessageBox.Yes | QMessageBox.No)
                 if reply == QMessageBox.No:
-                    continue # No añadir if user chooses not to
+                    continue 
 
             programs_to_add.append(program_info)
 
         self.selected_programs_to_load = programs_to_add
-        self.accept() # Cierra el diálogo y devuelve QDialog.Accepted
-
+        self.accept() 
+        
     def delete_programs(self):
         """Elimina los programas seleccionados de la lista guardada."""
-        selected_rows = sorted(list(set(index.row() for index in self.table.selectedIndexes())), reverse=True) # Eliminar desde el final para evitar problemas de índice
+        selected_rows = sorted(list(set(index.row() for index in self.table.selectedIndexes())), reverse=True)
         if not selected_rows:
             QMessageBox.warning(self, "Advertencia", "No se seleccionaron programas para eliminar.")
             return
@@ -142,7 +137,7 @@ class ManageProgramsDialog(QDialog):
                     deleted_count += 1
 
             if deleted_count > 0:
-                self.load_programs() # Recargar la tabla después de eliminar
+                self.load_programs()
                 QMessageBox.information(self, "Éxito", f"{deleted_count} programa(s) eliminado(s) exitosamente.")
             else:
                 QMessageBox.warning(self, "Error", "No se pudo eliminar ningún programa.")

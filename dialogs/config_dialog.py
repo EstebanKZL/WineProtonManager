@@ -1,27 +1,22 @@
-import sys
 import subprocess
-import shutil
+
+from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QTabWidget, QWidget, QListWidget,
+                             QHBoxLayout, QPushButton, QLabel, QFormLayout, QComboBox,
+                             QLineEdit, QGroupBox, QRadioButton, QDialogButtonBox,
+                             QMessageBox, QProgressDialog, QFileDialog, QProgressBar,
+                             QListWidgetItem, QCheckBox, QApplication)
+from PyQt5.QtCore import pyqtSignal, Qt, QDir
+from PyQt5.QtGui import QFont
+
 from pathlib import Path
 from functools import partial
-
-from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QListWidget, QLabel, QCheckBox, QDialog, QDialogButtonBox,
-    QMessageBox, QGroupBox, QComboBox, QLineEdit, QFileDialog,
-    QTabWidget, QFormLayout, QScrollArea, QListWidgetItem,
-    QTableWidget, QTableWidgetItem, QHeaderView,
-    QTreeWidget, QTreeWidgetItem, QProgressDialog, QProgressBar,
-    QInputDialog, QRadioButton, QSizePolicy
-)
-from PyQt5.QtCore import Qt, pyqtSignal, QDir, QSize, QUrl, QTimer, QProcess
-from PyQt5.QtGui import QIcon, QPalette, QColor, QFont, QDesktopServices
-
-from styles import STYLE_BREEZE, COLOR_BREEZE_PRIMARY, COLOR_BREEZE_ACCENT
-from downloader import DownloadThread, DecompressionThread, VersionSearchThread
-from dialogs.repository_dialog import RepositoryDialog # Importar el diálogo de repositorio
+from threads.download_thread import DownloadThread
+from threads.decompression_thread import DecompressionThread
+from threads.version_search_thread import VersionSearchThread
+from dialogs.repository_dialog import RepositoryDialog
+from styles import STYLE_BREEZE, COLOR_BREEZE_ACCENT, COLOR_BREEZE_PRIMARY
 from config_manager import ConfigManager
 
-# --- Diálogos de Aplicación ---
 class ConfigDialog(QDialog):
     config_saved = pyqtSignal()
 
@@ -53,9 +48,9 @@ class ConfigDialog(QDialog):
         self.tabs.addTab(self.settings_tab, "Ajustes Generales")
 
         self.downloads_tab = QWidget()
-        # [CORRECCIÓN] Inicializar los QWidget para los tabs antes de llamar a setup_
-        self.proton_tab = QWidget()  # Inicializar proton_tab aquí
-        self.wine_tab = QWidget()    # Inicializar wine_tab aquí
+
+        self.proton_tab = QWidget() 
+        self.wine_tab = QWidget()  
         self.setup_downloads_tab()
         self.tabs.addTab(self.downloads_tab, "Descargas de Versiones")
 
@@ -117,11 +112,10 @@ class ConfigDialog(QDialog):
         prefix_layout.addWidget(self.btn_prefix)
         layout.addRow("Ruta del Prefijo (WINEPREFIX):", prefix_layout)
 
-        # Grupo para opciones de prefijo de Proton (personalizado o Steam)
         self.proton_prefix_type_group = QGroupBox("Tipo de Prefijo de Proton")
         proton_prefix_layout = QVBoxLayout()
         self.radio_proton_custom_prefix = QRadioButton("Prefijo personalizado")
-        self.radio_proton_custom_prefix.setChecked(True) # Por defecto
+        self.radio_proton_custom_prefix.setChecked(True) 
         self.radio_proton_custom_prefix.toggled.connect(self.update_proton_prefix_options)
 
         self.radio_proton_steam_prefix = QRadioButton("Usar prefijo de Steam (por APPID)")
@@ -133,11 +127,10 @@ class ConfigDialog(QDialog):
         self.appid_line_edit = QLineEdit()
         self.appid_line_edit.setPlaceholderText("Ingresa el APPID de Steam (ej. 123456)")
         proton_prefix_layout.addWidget(self.appid_line_edit)
-        self.appid_line_edit.hide() # Oculto por defecto
+        self.appid_line_edit.hide() 
 
         self.proton_prefix_type_group.setLayout(proton_prefix_layout)
         layout.addRow(self.proton_prefix_type_group)
-
         # Grupo para configuración de Wine (directorio de instalación)
         self.wine_directory = QLineEdit()
         self.btn_wine = QPushButton("Explorar...")
@@ -151,7 +144,6 @@ class ConfigDialog(QDialog):
         wine_inner_layout = QFormLayout()
         wine_inner_layout.addRow("Directorio de instalación de Wine:", wine_layout)
         self.wine_group.setLayout(wine_inner_layout)
-
         # Grupo para configuración de Proton (directorio de instalación)
         self.proton_directory = QLineEdit()
         self.btn_proton = QPushButton("Explorar...")
@@ -186,87 +178,142 @@ class ConfigDialog(QDialog):
         buttons_layout.addWidget(self.btn_save_config)
         layout.addRow(buttons_layout)
 
-        self.update_config_field_visibility() # Inicializar visibilidad
+        self.update_config_field_visibility() 
         self.new_tab.setLayout(layout)
 
     def create_and_initialize_prefix(self):
-        """Crea el directorio del prefijo si no existe y ejecuta wineboot."""
+        """Crea el directorio del prefijo si no existe y ejecuta wineboot de forma segura."""
         config_name = self.config_name.text().strip()
         if not config_name:
-            QMessageBox.warning(self, "Error", "Debes especificar un nombre para la configuración antes de crear/inicializar el prefijo.")
+            QMessageBox.warning(self, "Error", "Debes especificar un nombre para la configuración.")
             return
 
-        current_config_data = {
+        # 1. Recopilar datos de la UI en un diccionario temporal
+        temp_config_data = {
             "type": "wine" if self.config_type.currentText() == "Wine" else "proton",
             "arch": self.architecture_combo.currentText()
         }
 
-        if current_config_data["type"] == "proton":
-            proton_dir = self.proton_directory.text().strip()
-            if not proton_dir or not Path(proton_dir).is_dir():
-                QMessageBox.warning(self, "Error", "Debes especificar un directorio de Proton válido.")
-                return
-            current_config_data["proton_dir"] = proton_dir
-            if self.radio_proton_steam_prefix.isChecked():
-                appid = self.appid_line_edit.text().strip()
-                if not appid.isdigit() or not appid:
-                    QMessageBox.warning(self, "Error", "Para un prefijo de Steam, debes ingresar un APPID numérico válido.")
-                    return
-                steam_compat_data_root = Path.home() / ".local/share/Steam/steamapps/compatdata"
-                current_config_data["prefix"] = str(steam_compat_data_root / appid / "pfx")
-                current_config_data["steam_appid"] = appid
-            else:
+        try:
+            if temp_config_data["type"] == "proton":
+                proton_dir = self.proton_directory.text().strip()
+                if not proton_dir or not Path(proton_dir).is_dir():
+                    raise ValueError("Debes especificar un directorio de Proton válido.")
+                temp_config_data["proton_dir"] = proton_dir
+
+                if self.radio_proton_steam_prefix.isChecked():
+                    appid = self.appid_line_edit.text().strip()
+                    if not appid or not appid.isdigit():
+                        raise ValueError("Para un prefijo de Steam, debes ingresar un APPID numérico válido.")
+                    steam_compat_data_root = Path.home() / ".local/share/Steam/steamapps/compatdata"
+                    temp_config_data["prefix"] = str(steam_compat_data_root / appid / "pfx")
+                    temp_config_data["steam_appid"] = appid
+                else:
+                    prefix = self.prefix_path.text().strip()
+                    if not prefix: raise ValueError("Debes especificar una ruta de prefijo para Proton.")
+                    temp_config_data["prefix"] = prefix
+            else: # Wine
                 prefix = self.prefix_path.text().strip()
-                if not prefix:
-                    QMessageBox.warning(self, "Error", "Debes especificar un prefijo para Proton personalizado.")
-                    return
-                current_config_data["prefix"] = prefix
-        else: # Tipo Wine
-            prefix = self.prefix_path.text().strip()
-            if not prefix:
-                QMessageBox.warning(self, "Error", "Debes especificar un prefijo para Wine.")
-                return
-            current_config_data["prefix"] = prefix
-            wine_dir = self.wine_directory.text().strip()
-            if wine_dir and Path(wine_dir).is_dir():
-                current_config_data["wine_dir"] = wine_dir
-            elif wine_dir: # Si no está vacío pero no es un directorio válido
-                QMessageBox.warning(self, "Error", "El directorio de instalación de Wine especificado no es válido.")
-                return
+                if not prefix: raise ValueError("Debes especificar una ruta de prefijo para Wine.")
+                temp_config_data["prefix"] = prefix
 
-        prefix_path = Path(current_config_data["prefix"])
+                wine_dir = self.wine_directory.text().strip()
+                if wine_dir and not Path(wine_dir).is_dir():
+                    raise ValueError("El directorio de instalación de Wine no es válido.")
+                elif wine_dir:
+                    temp_config_data["wine_dir"] = wine_dir
+        except ValueError as e:
+            QMessageBox.warning(self, "Entrada Inválida", str(e))
+            return
 
-        # Preguntar si el prefijo ya existe
+        prefix_path = Path(temp_config_data["prefix"])
         if prefix_path.exists():
             reply = QMessageBox.question(self, "Prefijo Existente",
-                                         f"El prefijo '{prefix_path}' ya existe. ¿Deseas reinicializarlo con wineboot?",
+                                         f"El prefijo '{prefix_path}' ya existe. ¿Deseas reinicializarlo?",
                                          QMessageBox.Yes | QMessageBox.No)
-            if reply == QMessageBox.No:
-                return
+            if reply == QMessageBox.No: return
 
-        # Temporalmente añadir la configuración para obtener el entorno con ConfigManager
+        # 2. Proceder con la inicialización
+        progress_dialog = QProgressDialog("Inicializando Prefijo...", "", 0, 0, self)
+        progress_dialog.setWindowTitle("Inicialización del Prefijo")
+        progress_dialog.setWindowModality(Qt.WindowModal)
+        progress_dialog.setCancelButton(None)
+        self.config_manager.apply_breeze_style_to_widget(progress_dialog)
+        progress_dialog.show()
+
+        process = None
+        try:
+            prefix_path.mkdir(parents=True, exist_ok=True, mode=0o755)
+
+            # 3. Crear una copia temporal de las configuraciones para obtener el entorno de forma segura
+            temp_full_configs = {
+                "configs": {config_name: temp_config_data},
+                "last_used": config_name
+            }
+            original_configs = self.config_manager.configs
+            self.config_manager.configs = temp_full_configs
+            env = self.config_manager.get_current_environment(config_name)
+            self.config_manager.configs = original_configs # Restaurar inmediatamente
+
+            wine_executable = env.get("WINE")
+            if not wine_executable or not Path(wine_executable).is_file():
+                raise FileNotFoundError(f"Ejecutable de Wine no encontrado: {wine_executable}")
+
+            process = subprocess.Popen([wine_executable, "wineboot"], env=env,
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       text=True, bufsize=1, universal_newlines=True)
+            log_output = ""
+            while True:
+                line = process.stdout.readline()
+                if not line: break
+                log_output += line
+                progress_dialog.setLabelText(f"Inicializando...\n{line.strip()}")
+                QApplication.processEvents()
+
+            process.wait(timeout=120)
+            self.config_manager.write_to_log("Creación del Prefijo", f"Wineboot ({config_name})", f"Salida:\n{log_output}")
+
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(process.returncode, "wineboot", output=log_output)
+
+            QMessageBox.information(self, "Éxito", "El prefijo ha sido inicializado exitosamente.\nRecuerda guardar la configuración si deseas conservarla.")
+
+        except Exception as e:
+            if process: process.kill()
+            error_msg = f"No se pudo inicializar el prefijo: {e}"
+            if isinstance(e, subprocess.CalledProcessError):
+                error_msg = f"Falló la inicialización del prefijo. Código: {e.returncode}\nSalida: {e.output}"
+            QMessageBox.critical(self, "Error al Crear/Inicializar Prefijo", error_msg)
+        finally:
+            progress_dialog.close()
+
+    def _create_prefix(self, config: dict, config_name: str, prefix_path: Path):
+        """Crea un nuevo prefijo de Wine/Proton y lo inicializa con wineboot."""
+        prefix_path.mkdir(parents=True, exist_ok=True, mode=0o755)
+
         original_configs = self.config_manager.configs.copy()
         temp_configs_dict = {k: v.copy() if isinstance(v, dict) else v for k, v in original_configs.get("configs", {}).items()}
-        temp_configs_dict[config_name] = current_config_data
+        temp_configs_dict[config_name] = config
         self.config_manager.configs["configs"] = temp_configs_dict
-        self.config_manager.configs["last_used"] = config_name # Para que get_current_environment funcione correctamente
+        self.config_manager.configs["last_used"] = config_name
+
+        env = self.config_manager.get_current_environment(config_name)
+
+        wine_executable = env.get("WINE")
+        if not wine_executable or not Path(wine_executable).is_file():
+            self.config_manager.configs = original_configs
+            self.config_manager.save_configs()
+            raise FileNotFoundError(f"Ejecutable de Wine no encontrado: {wine_executable}")
 
         progress_dialog = QProgressDialog("Inicializando Prefijo de Wine/Proton...", "", 0, 0, self)
         progress_dialog.setWindowTitle("Inicialización del Prefijo")
         progress_dialog.setWindowModality(Qt.WindowModal)
-        progress_dialog.setCancelButton(None) # No permitir cancelar wineboot fácilmente
+        progress_dialog.setCancelButton(None)
         progress_dialog.setFixedSize(450, 150)
         self.config_manager.apply_breeze_style_to_widget(progress_dialog)
         progress_dialog.show()
 
         try:
-            prefix_path.mkdir(parents=True, exist_ok=True, mode=0o755) # Crear el directorio si no existe
-            env = self.config_manager.get_current_environment(config_name)
-
-            wine_executable = env.get("WINE")
-            if not wine_executable or not Path(wine_executable).is_file():
-                raise FileNotFoundError(f"Ejecutable de Wine no encontrado en el entorno: {wine_executable}")
-
             process = subprocess.Popen(
                 [wine_executable, "wineboot"],
                 env=env,
@@ -276,36 +323,27 @@ class ConfigDialog(QDialog):
                 bufsize=1,
                 universal_newlines=True
             )
-
             log_output = ""
-            while True:
-                line = process.stdout.readline()
-                if not line:
-                    break
+            for line in process.stdout:
                 log_output += line
                 progress_dialog.setLabelText(f"Inicializando Prefijo de Wine/Proton...\n{line.strip()}")
-                QApplication.processEvents() # Mantener la UI responsiva
+                QApplication.processEvents()
+            process.wait(timeout=60)
 
-            process.wait(timeout=120) # Esperar a que wineboot termine
-
-            self.config_manager.write_to_log("Creación del Prefijo", f"Salida de Wineboot para {config_name}:\n{log_output}")
+            self.config_manager.write_to_log("Creación del Prefijo", f"Wineboot ({config_name})", f"Salida:\n{log_output}")
 
             if process.returncode != 0:
                 raise subprocess.CalledProcessError(process.returncode, "wineboot", output=log_output)
 
-            QMessageBox.information(self, "Prefijo Creado/Inicializado", "El prefijo ha sido creado/inicializado exitosamente.")
         except subprocess.TimeoutExpired:
             process.kill()
-            QMessageBox.critical(self, "Error al Crear/Inicializar Prefijo", "La inicialización del prefijo de Wine/Proton agotó el tiempo de espera.")
+            raise Exception("La inicialización del prefijo de Wine/Proton agotó el tiempo de espera.")
         except subprocess.CalledProcessError as e:
-            QMessageBox.critical(self, "Error al Crear/Inicializar Prefijo", f"No se pudo inicializar el prefijo de Wine/Proton. Código de salida: {e.returncode}\nSalida: {e.output}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error al Crear/Inicializar Prefijo", f"Error: {str(e)}")
+            raise Exception(f"No se pudo inicializar el prefijo de Wine/Proton. Código de salida: {e.returncode}\nSalida: {e.output}")
         finally:
             progress_dialog.close()
-            # Restaurar la configuración original (si no se guardó permanentemente)
             self.config_manager.configs = original_configs
-            self.config_manager.save_configs() # Asegurarse de que el estado guardado sea consistente
+            self.config_manager.save_configs()
 
     def update_proton_prefix_options(self):
         """Controla la visibilidad de los campos de prefijo según el tipo de Proton."""
@@ -327,7 +365,6 @@ class ConfigDialog(QDialog):
         self.wine_group.setVisible(not is_proton)
         self.proton_prefix_type_group.setVisible(is_proton)
 
-        # Lógica adicional para deshabilitar campos si es prefijo Steam
         if is_proton and self.radio_proton_steam_prefix.isChecked():
             self.prefix_path.setEnabled(False)
             self.btn_prefix.setEnabled(False)
@@ -336,13 +373,13 @@ class ConfigDialog(QDialog):
             self.btn_prefix.setEnabled(True)
 
     def setup_downloads_tab(self):
-        # [CORRECCIÓN] Crear un layout para downloads_tab
-        downloads_tab_layout = QVBoxLayout(self.downloads_tab) # Asignar a downloads_tab
+        
+        downloads_tab_layout = QVBoxLayout(self.downloads_tab) 
 
-        self.download_tabs = QTabWidget() # Es importante que este sea un miembro del diálogo si se accede desde otros métodos
-
-        # Configuración de la pestaña Proton
-        proton_inner_layout = QVBoxLayout(self.proton_tab) # Nuevo layout para el contenido de proton_tab
+        self.download_tabs = QTabWidget() 
+       
+       # Configuración de la pestaña Proton
+        proton_inner_layout = QVBoxLayout(self.proton_tab)
         self.group_proton_repos = QGroupBox("Repositorios de Proton")
         repo_layout = QVBoxLayout()
         self.list_repos_proton = QListWidget()
@@ -364,7 +401,7 @@ class ConfigDialog(QDialog):
         repo_btn_layout.addWidget(self.btn_toggle_proton_repo)
         repo_layout.addLayout(repo_btn_layout)
         self.group_proton_repos.setLayout(repo_layout)
-        proton_inner_layout.addWidget(self.group_proton_repos) # Añadir al layout interno de proton_tab
+        proton_inner_layout.addWidget(self.group_proton_repos)
 
         self.group_proton_versions = QGroupBox("Versiones de Proton Disponibles")
         versions_layout = QVBoxLayout()
@@ -381,10 +418,10 @@ class ConfigDialog(QDialog):
         buttons_layout.addWidget(self.btn_download_proton)
         versions_layout.addLayout(buttons_layout)
         self.group_proton_versions.setLayout(versions_layout)
-        proton_inner_layout.addWidget(self.group_proton_versions) # Añadir al layout interno de proton_tab
-
-        # Configuración de la pestaña Wine
-        wine_inner_layout = QVBoxLayout(self.wine_tab) # Nuevo layout para el contenido de wine_tab
+        proton_inner_layout.addWidget(self.group_proton_versions) 
+       
+       # Configuración de la pestaña Wine
+        wine_inner_layout = QVBoxLayout(self.wine_tab) 
         self.group_wine_repos = QGroupBox("Repositorios de Wine")
         wine_repo_layout = QVBoxLayout()
         self.list_repos_wine = QListWidget()
@@ -406,7 +443,7 @@ class ConfigDialog(QDialog):
         wine_repo_btn_layout.addWidget(self.btn_toggle_wine_repo)
         wine_repo_layout.addLayout(wine_repo_btn_layout)
         self.group_wine_repos.setLayout(wine_repo_layout)
-        wine_inner_layout.addWidget(self.group_wine_repos) # Añadir al layout interno de wine_tab
+        wine_inner_layout.addWidget(self.group_wine_repos)
 
         self.group_wine_versions = QGroupBox("Versiones de Wine Disponibles")
         wine_versions_layout = QVBoxLayout()
@@ -423,14 +460,12 @@ class ConfigDialog(QDialog):
         wine_buttons_layout.addWidget(self.btn_download_wine)
         wine_versions_layout.addLayout(wine_buttons_layout)
         self.group_wine_versions.setLayout(wine_versions_layout)
-        wine_inner_layout.addWidget(self.group_wine_versions) # Añadir al layout interno de wine_tab
-        # self.wine_tab.setLayout(wine_inner_layout) # Ya se asignó en el constructor del layout
+        wine_inner_layout.addWidget(self.group_wine_versions)
 
-        # [CORRECCIÓN] Añadir los tabs al QTabWidget principal de descargas
         self.download_tabs.addTab(self.proton_tab, "Proton")
         self.download_tabs.addTab(self.wine_tab, "Wine")
 
-        downloads_tab_layout.addWidget(self.download_tabs) # Añadir el QTabWidget al layout de downloads_tab
+        downloads_tab_layout.addWidget(self.download_tabs) 
 
     def download_selected_proton_version(self):
         """Inicia la descarga de la versión de Proton seleccionada."""
@@ -440,8 +475,6 @@ class ConfigDialog(QDialog):
             return
 
         assets = selected_item.data(Qt.UserRole)
-
-        # Diálogo para seleccionar el archivo específico (si hay varios)
         dialog = QDialog(self)
         dialog.setWindowTitle("Seleccionar Archivo Proton")
         layout = QVBoxLayout()
@@ -452,7 +485,7 @@ class ConfigDialog(QDialog):
         version_combo = QComboBox()
         for asset in assets:
             name = asset["name"]
-            size = asset.get("size", 0) / (1024 * 1024) # Mostrar tamaño en MB
+            size = asset.get("size", 0) / (1024 * 1024) 
             version_combo.addItem(f"{name} ({size:.1f} MB)", asset)
         layout.addWidget(version_combo)
 
@@ -462,7 +495,7 @@ class ConfigDialog(QDialog):
         layout.addWidget(button_box)
 
         dialog.setLayout(layout)
-        self.config_manager.apply_breeze_style_to_widget(dialog) # Aplicar estilo al diálogo
+        self.config_manager.apply_breeze_style_to_widget(dialog) 
 
         if dialog.exec_() == QDialog.Accepted:
             selected_asset = version_combo.currentData()
@@ -643,7 +676,7 @@ class ConfigDialog(QDialog):
         self.progress_dialog.setWindowTitle("Actualizando Versiones")
         self.progress_dialog.setWindowModality(Qt.WindowModal)
         self.progress_dialog.setAutoClose(True)
-        self.progress_dialog.setCancelButton(None) # No permitir cancelar la búsqueda de versiones
+        self.progress_dialog.setCancelButton(None) 
         self.config_manager.apply_breeze_style_to_widget(self.progress_dialog)
 
         self.version_search_thread = VersionSearchThread(repo_type, enabled_repos)
@@ -653,7 +686,7 @@ class ConfigDialog(QDialog):
         self.version_search_thread.error.connect(lambda msg: QMessageBox.warning(self, "Error Obteniendo Versiones", msg))
 
         self.version_search_thread.start()
-        self.progress_dialog.exec_() # Mostrar el diálogo de progreso de forma modal
+        self.progress_dialog.exec_() 
 
     def update_proton_versions(self):
         self.update_versions("proton")
@@ -665,7 +698,7 @@ class ConfigDialog(QDialog):
         """Añade un lanzamiento a la lista correspondiente (Wine o Proton)."""
         list_widget = self.list_versions_proton if repo_type == "proton" else self.list_versions_wine
         item = QListWidgetItem(release_name)
-        item.setData(Qt.UserRole, assets) # Almacena los assets para usarlos al descargar
+        item.setData(Qt.UserRole, assets) 
 
         tooltip = f"<b>Versión:</b> {version}<br/>" \
                   f"<b>Fecha:</b> {published_at.split('T')[0] if published_at else 'N/A'}<br/>" \
@@ -689,7 +722,6 @@ class ConfigDialog(QDialog):
 
         assets = selected_item.data(Qt.UserRole)
 
-        # Diálogo para seleccionar el archivo específico (si hay varios)
         dialog = QDialog(self)
         dialog.setWindowTitle("Seleccionar Archivo Wine")
         layout = QVBoxLayout()
@@ -725,21 +757,22 @@ class ConfigDialog(QDialog):
         self.progress_dialog = QProgressDialog(f"Descargando {name}...", "Cancelar", 0, 100, self)
         self.progress_dialog.setWindowTitle("Descargando")
         self.progress_dialog.setWindowModality(Qt.WindowModal)
-        self.progress_dialog.setAutoClose(False) # No cerrar automáticamente hasta que se maneje la descompresión/error
+        self.progress_dialog.setAutoClose(False)
         self.config_manager.apply_breeze_style_to_widget(self.progress_dialog)
 
         self.download_progress_bar = QProgressBar(self.progress_dialog)
         self.download_progress_bar.setRange(0, 100)
         self.progress_dialog.setBar(self.download_progress_bar)
 
-        self.download_thread = DownloadThread(url, destination, name, self.config_manager)
+        self.download_thread = DownloadThread(url, destination, name, self.config_manager, "Downloads")
+
         self.download_thread.progress.connect(self.download_progress_bar.setValue)
         self.download_thread.finished.connect(partial(self.on_download_finished, name=name))
         self.download_thread.error.connect(self.show_download_error)
-        self.progress_dialog.canceled.connect(self.download_thread.stop) # Conectar botón de cancelar a stop del hilo
+        self.progress_dialog.canceled.connect(self.download_thread.stop)
 
         self.download_thread.start()
-        self.progress_dialog.exec_() # Mostrar el diálogo de progreso de forma modal
+        self.progress_dialog.exec_()
 
     def show_download_error(self, error_msg: str):
         """Muestra un mensaje de error de descarga."""
@@ -749,10 +782,11 @@ class ConfigDialog(QDialog):
     def on_download_finished(self, filepath: str, name: str):
         """Maneja la finalización de una descarga, iniciando la descompresión."""
         self.progress_dialog.setLabelText(f"Descomprimiendo {name}...")
-        self.progress_dialog.setMaximum(0) # Indeterminado para descompresión
+        self.progress_dialog.setMaximum(0)
         self.config_manager.apply_breeze_style_to_widget(self.progress_dialog)
 
-        self.decompression_thread = DecompressionThread(filepath, self.config_manager, name)
+        self.decompression_thread = DecompressionThread(filepath, self.config_manager, name, "Downloads")
+
         self.decompression_thread.finished.connect(partial(self.on_decompression_finished, name=name))
         self.decompression_thread.error.connect(self.show_decompression_error)
         self.decompression_thread.start()
@@ -810,7 +844,7 @@ class ConfigDialog(QDialog):
                         QMessageBox.warning(self, "Error", "Debes especificar un prefijo para Proton personalizado.")
                         return
                     config_data["prefix"] = prefix
-            else: # Tipo Wine
+            else:
                 if not prefix:
                     QMessageBox.warning(self, "Error", "Debes especificar un prefijo para Wine.")
                     return
@@ -822,34 +856,43 @@ class ConfigDialog(QDialog):
                         return
                     config_data["wine_dir"] = wine_directory
 
-            # Guardar o actualizar la configuración
             self.config_manager.configs.setdefault("configs", {})[new_config_name] = config_data
             self.config_manager.save_configs()
             QMessageBox.information(self, "Guardado", f"Configuración '{new_config_name}' guardada exitosamente.")
 
-            self.load_configs() # Recargar la lista de configs en la primera pestaña
-            self.tabs.setCurrentIndex(0) # Volver a la pestaña de "Configuraciones Guardadas"
-            self.current_config_name_for_editing = None # Limpiar el estado de edición
+            self.load_configs() 
+            self.tabs.setCurrentIndex(0)
+            self.current_config_name_for_editing = None
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error guardando configuración: {str(e)}")
 
     def setup_settings_tab(self):
         main_layout = QVBoxLayout()
-        # El tema se aplica inmediatamente, el resto de ajustes pide reiniciar
 
         paths_group = QGroupBox("Rutas")
         paths_layout = QFormLayout()
 
+        # Campo para Winetricks (existente)
         self.edit_winetricks_path = QLineEdit(self.config_manager.get_winetricks_path())
         self.btn_winetricks = QPushButton("Explorar...")
         self.btn_winetricks.setAutoDefault(False)
         self.btn_winetricks.clicked.connect(self.browse_winetricks)
-
         winetricks_layout = QHBoxLayout()
         winetricks_layout.addWidget(self.edit_winetricks_path)
         winetricks_layout.addWidget(self.btn_winetricks)
         paths_layout.addRow("Ruta de Winetricks:", winetricks_layout)
+
+        # Campo para la Ruta Raíz de Steam
+        self.edit_steam_root_path = QLineEdit(self.config_manager.get_steam_root_path())
+        self.edit_steam_root_path.setPlaceholderText("Dejar en blanco para detección automática")
+        self.btn_browse_steam_root = QPushButton("Explorar...")
+        self.btn_browse_steam_root.setAutoDefault(False)
+        self.btn_browse_steam_root.clicked.connect(self.browse_steam_root)
+        steam_root_layout = QHBoxLayout()
+        steam_root_layout.addWidget(self.edit_steam_root_path)
+        steam_root_layout.addWidget(self.btn_browse_steam_root)
+        paths_layout.addRow("Ruta Raíz de Steam:", steam_root_layout)
 
         paths_group.setLayout(paths_layout)
         main_layout.addWidget(paths_group)
@@ -861,7 +904,6 @@ class ConfigDialog(QDialog):
         self.theme_combo.addItems(["Claro", "Oscuro"])
         current_theme = self.config_manager.get_theme()
         self.theme_combo.setCurrentText("Oscuro" if current_theme == "dark" else "Claro")
-
         install_options_layout.addRow("Tema de Interfaz:", self.theme_combo)
 
         silent_layout = QHBoxLayout()
@@ -885,7 +927,7 @@ class ConfigDialog(QDialog):
         install_options_group.setLayout(install_options_layout)
         main_layout.addWidget(install_options_group)
 
-        backup_options_group = QGroupBox("Opciones de Backup") # Todavía usamos el grupo para la última opción
+        backup_options_group = QGroupBox("Opciones de Backup") 
         backup_options_layout = QFormLayout()
 
         ask_for_backup_layout = QHBoxLayout()
@@ -912,10 +954,9 @@ class ConfigDialog(QDialog):
 
         self.settings_tab.setLayout(main_layout)
 
-    # MODIFICACIÓN 1: Método para actualizar el estado del botón "Guardar Ajustes"
     def update_save_settings_button_state(self):
         """Habilita/deshabilita el botón 'Guardar Ajustes' basándose en si hay una instalación en curso."""
-        # Se asume que config_manager.app_instance es una referencia válida a InstallerApp
+
         if hasattr(self.config_manager, 'app_instance') and self.config_manager.app_instance:
             is_installer_running = self.config_manager.app_instance.installer_thread is not None and self.config_manager.app_instance.installer_thread.isRunning()
             is_backup_running = self.config_manager.app_instance.backup_thread is not None and self.config_manager.app_instance.backup_thread.isRunning()
@@ -924,7 +965,7 @@ class ConfigDialog(QDialog):
             self.btn_save_settings.setEnabled(True) # Por defecto habilitado si no hay app_instance
 
     def _apply_theme_setting(self, text: str):
-        """[MODIFICACIÓN 3] Este método ya no se llama directamente por currentTextChanged.
+        """Este método ya no se llama directamente por currentTextChanged.
         Ahora solo actualiza la configuración en memoria. El cambio real se aplica al reiniciar la app."""
         theme_name = "dark" if text == "Oscuro" else "light"
         self.config_manager.set_theme(theme_name)
@@ -932,21 +973,50 @@ class ConfigDialog(QDialog):
     def save_settings(self):
         """Guarda los ajustes generales de la aplicación."""
         try:
+            # Guardar ruta de Winetricks
             winetricks_path_ok = self.config_manager.set_winetricks_path(self.edit_winetricks_path.text().strip())
 
-            theme = "dark" if self.theme_combo.currentText() == "Oscuro" else "light"
-            self.config_manager.set_theme(theme) # Actualiza self.configs["settings"]["theme"]
-            self.config_manager.save_configs() # Guarda la configuración actualizada en el archivo
+            # Guardar ruta de Steam
+            steam_root_path = self.edit_steam_root_path.text().strip()
+            self.config_manager.set_steam_root_path(steam_root_path)
 
+            # Guardar Tema
+            theme = "dark" if self.theme_combo.currentText() == "Oscuro" else "light"
+            self.config_manager.set_theme(theme)
+            
+            # Guardar otras opciones
             self.config_manager.set_silent_install(self.checkbox_silent_global.isChecked())
             self.config_manager.set_force_winetricks_install(self.checkbox_force_winetricks.isChecked())
             self.config_manager.set_ask_for_backup_before_action(self.checkbox_ask_for_backup_before_action.isChecked())
 
-            QMessageBox.information(self, "Guardado", "Ajustes guardados exitosamente.\nLa aplicación se reiniciará para aplicar los cambios.")
-            self.config_saved.emit() # Notificar a la ventana principal para que inicie el reinicio
-            self.accept() # Cerrar el diálogo de configuración
+            # Guardar todo en el archivo JSON
+            self.config_manager.save_configs()
+
+            QMessageBox.information(self, "Guardado", "Ajustes guardados exitosamente.\nAlgunos cambios, como el tema o la ruta de Steam, pueden requerir un reinicio para aplicarse completamente.")
+            self.config_saved.emit() 
+            self.accept() 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error guardando ajustes: {str(e)}")
+
+    def browse_steam_root(self):
+        """Abre un diálogo para seleccionar la ruta raíz de Steam."""
+        dialog = QFileDialog(self)
+        dialog.setOption(QFileDialog.DontUseNativeDialog)
+        dialog.setFileMode(QFileDialog.Directory)
+        dialog.setOption(QFileDialog.ShowDirsOnly, True)
+        dialog.setWindowTitle("Seleccionar Directorio Raíz de Steam")
+
+        # Usar una nueva clave para el último directorio o una existente
+        dialog.setDirectory(self.config_manager.get_last_browsed_dir("steam_root"))
+        dialog.setFilter(QDir.AllEntries | QDir.Hidden | QDir.NoDotAndDotDot)  
+
+        self.config_manager.apply_breeze_style_to_widget(dialog)
+
+        if dialog.exec_():
+            selected = dialog.selectedFiles()
+            if selected:
+                self.edit_steam_root_path.setText(selected[0])
+                self.config_manager.set_last_browsed_dir("steam_root", selected[0])
 
     def browse_winetricks(self):
         """Abre un diálogo para seleccionar la ruta de Winetricks."""
@@ -954,17 +1024,17 @@ class ConfigDialog(QDialog):
         dialog.setOption(QFileDialog.DontUseNativeDialog)
         dialog.setFileMode(QFileDialog.ExistingFile)
         dialog.setNameFilter("Ejecutables (*);;Todos los Archivos (*)")
-        # MODIFICACIÓN 4: Usar la última ruta explorada para Winetricks
-        dialog.setDirectory(self.config_manager.get_last_browsed_dir("winetricks"))
-        dialog.setFilter(QDir.AllEntries | QDir.AllDirs | QDir.NoDotAndDotDot) # Permitir directorios también
 
-        self.config_manager.apply_breeze_style_to_widget(dialog) # Aplicar estilo al diálogo de archivo
+        dialog.setDirectory(self.config_manager.get_last_browsed_dir("winetricks"))
+        dialog.setFilter(QDir.AllEntries | QDir.AllDirs | QDir.NoDotAndDotDot) 
+
+        self.config_manager.apply_breeze_style_to_widget(dialog)
 
         if dialog.exec_():
             selected = dialog.selectedFiles()
             if selected:
                 self.edit_winetricks_path.setText(selected[0])
-                # MODIFICACIÓN 4: Guardar la nueva ruta explorada
+
                 self.config_manager.set_last_browsed_dir("winetricks", str(Path(selected[0]).parent))
 
 
@@ -974,15 +1044,14 @@ class ConfigDialog(QDialog):
         configs = self.config_manager.configs.get("configs", {})
         last_used = self.config_manager.configs.get("last_used", "")
 
-        # Ordenar alfabéticamente, pero con 'last_used' primero
+        
         sorted_config_names = sorted(configs.keys())
         if last_used and last_used in sorted_config_names:
             sorted_config_names.remove(last_used)
             sorted_config_names.insert(0, last_used)
-
-        # Aplicar fuente negrita a los ítems de la lista
+    
         base_font = STYLE_BREEZE["font"]
-        # MODIFICACIÓN 3: Reducir tamaño de fuente en 2 puntos
+     
         list_font_size = base_font.pointSize() + 1
         font_for_item = QFont(base_font.family(), list_font_size)
         font_for_item.setBold(True)
@@ -991,25 +1060,25 @@ class ConfigDialog(QDialog):
             item = QListWidgetItem(name)
             if name == last_used:
                 item.setText(f"{name} (Por Defecto)")
-            item.setFont(font_for_item) # Aplicar la fuente
+            item.setFont(font_for_item) 
             self.list_config.addItem(item)
             if name == last_used:
-                self.list_config.setCurrentItem(item) # Seleccionar el por defecto
+                self.list_config.setCurrentItem(item) 
 
-        self.update_displayed_config_info() # Actualizar info al cargar
+        self.update_displayed_config_info() 
 
     def edit_config(self, item: QListWidgetItem):
         """Carga una configuración seleccionada para edición."""
         config_name_display = item.text()
         config_name = config_name_display.replace(" (Por Defecto)", "").strip()
-        self.current_config_name_for_editing = config_name # Guardar el nombre original para la edición
+        self.current_config_name_for_editing = config_name 
 
         config = self.config_manager.get_config(config_name)
         if not config:
             QMessageBox.warning(self, "Error", "Configuración no encontrada o corrupta.")
             return
 
-        self.tabs.setCurrentIndex(1) # Ir a la pestaña de edición
+        self.tabs.setCurrentIndex(1) 
         self.config_name.setText(config_name)
 
         self.config_type.setCurrentText("Proton" if config.get("type") == "proton" else "Wine")
@@ -1018,20 +1087,20 @@ class ConfigDialog(QDialog):
 
         if config.get("type") == "proton":
             self.proton_directory.setText(config.get("proton_dir", ""))
-            self.wine_directory.setText("") # Limpiar campo no relevante
+            self.wine_directory.setText("") 
             if "steam_appid" in config:
                 self.radio_proton_steam_prefix.setChecked(True)
                 self.appid_line_edit.setText(config["steam_appid"])
             else:
                 self.radio_proton_custom_prefix.setChecked(True)
                 self.appid_line_edit.setText("")
-        else: # Tipo Wine
+        else: 
             self.wine_directory.setText(config.get("wine_dir", ""))
-            self.proton_directory.setText("") # Limpiar campo no relevante
-            self.radio_proton_custom_prefix.setChecked(True) # Asegurarse de que esté en modo "custom" para Wine
+            self.proton_directory.setText("")
+            self.radio_proton_custom_prefix.setChecked(True)
             self.appid_line_edit.setText("")
 
-        self.update_config_field_visibility() # Actualizar visibilidad de campos
+        self.update_config_field_visibility()
 
     def delete_config(self):
         """Elimina una configuración seleccionada."""
@@ -1071,7 +1140,7 @@ class ConfigDialog(QDialog):
         self.config_manager.configs["last_used"] = config_name
         self.config_manager.save_configs()
         QMessageBox.information(self, "Éxito", f"Configuración '{config_name}' establecida como predeterminada.")
-        self.load_configs() # Recargar para que se actualice el texto "(Por Defecto)"
+        self.load_configs() 
 
     def update_displayed_config_info(self):
         """Actualiza la información de la configuración seleccionada en la GUI."""
@@ -1111,7 +1180,7 @@ class ConfigDialog(QDialog):
                 info.append(f"<b>Prefijo gestionado por Steam:</b> Sí")
             else:
                 info.append(f"<b>Prefijo personalizado:</b> Sí")
-        else: # Tipo Wine
+        else:
             wine_dir = config.get('wine_dir', 'Sistema (PATH)')
             info.extend([
                 f"<b>Directorio de Wine:</b> {wine_dir}"
@@ -1143,26 +1212,24 @@ class ConfigDialog(QDialog):
         if path:
             self.proton_directory.setText(path)
 
-    def _get_directory_path(self, title="Seleccionar Directorio", config_key: str = "default") -> str | None: # MODIFICACIÓN 4
-        """Helper para abrir un diálogo de selección de directorio.
-           MODIFICACIÓN 4: Ahora usa config_key para gestionar la última ruta explorada."""
+    def _get_directory_path(self, title="Seleccionar Directorio", config_key: str = "default") -> str | None:
+        """Helper para abrir un diálogo de selección de directorio."""
         dialog = QFileDialog(self)
         dialog.setWindowTitle(title)
         dialog.setFileMode(QFileDialog.Directory)
         dialog.setOption(QFileDialog.ShowDirsOnly, True)
         dialog.setFilter(QDir.AllEntries | QDir.Hidden | QDir.NoDotAndDotDot)
-        # MODIFICACIÓN 4: Usar la última ruta guardada
+
         dialog.setDirectory(self.config_manager.get_last_browsed_dir(config_key))
 
         self.config_manager.apply_breeze_style_to_widget(dialog)
 
         if dialog.exec_() == QDialog.Accepted:
             selected_path = dialog.selectedFiles()[0]
-            # MODIFICACIÓN 4: Guardar la nueva ruta explorada
+
             self.config_manager.set_last_browsed_dir(config_key, selected_path)
             return selected_path
         return None
-
 
     def test_configuration(self):
         """Prueba la configuración actual de Wine/Proton."""
@@ -1171,7 +1238,6 @@ class ConfigDialog(QDialog):
             QMessageBox.warning(self, "Advertencia", "Por favor, introduce un nombre para la configuración antes de probar.")
             return
 
-        # Construir una configuración temporal basada en los campos actuales del formulario
         temp_config = {
             "type": "wine" if self.config_type.currentText() == "Wine" else "proton",
             "prefix": self.prefix_path.text().strip(),
@@ -1187,15 +1253,14 @@ class ConfigDialog(QDialog):
                 steam_compat_data_root = Path.home() / ".local/share/Steam/steamapps/compatdata"
                 temp_config["prefix"] = str(steam_compat_data_root / appid / "pfx")
                 temp_config["steam_appid"] = appid
-        elif self.wine_directory.text().strip(): # Si es Wine y hay un directorio especificado
+        elif self.wine_directory.text().strip():
             temp_config["wine_dir"] = self.wine_directory.text().strip()
 
-        # Guardar una copia de las configuraciones actuales y modificar temporalmente
         original_configs = self.config_manager.configs.copy()
         temp_configs_dict = {k: v.copy() if isinstance(v, dict) else v for k, v in original_configs.get("configs", {}).items()}
         temp_configs_dict[config_name_test] = temp_config
         self.config_manager.configs["configs"] = temp_configs_dict
-        self.config_manager.configs["last_used"] = config_name_test # Necesario para get_current_environment
+        self.config_manager.configs["last_used"] = config_name_test 
 
         try:
             env = self.config_manager.get_current_environment(config_name_test)
@@ -1204,14 +1269,13 @@ class ConfigDialog(QDialog):
             if not wine_executable or not Path(wine_executable).is_file():
                 raise FileNotFoundError(f"Ejecutable de Wine no encontrado en la ruta especificada o en el PATH del sistema: {wine_executable}")
 
-            # Ejecutar wine --version para probar la configuración
             process = subprocess.run(
                 [wine_executable, "--version"],
                 env=env,
                 capture_output=True,
                 text=True,
                 timeout=10,
-                check=True # Levanta CalledProcessError si el código de retorno no es 0
+                check=True 
             )
             version_output = process.stdout.strip()
             QMessageBox.information(
@@ -1229,6 +1293,7 @@ class ConfigDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Error de Prueba", f"Error inesperado durante la prueba: {str(e)}")
         finally:
-            # Restaurar la configuración original
+
             self.config_manager.configs = original_configs
-            self.config_manager.save_configs() # Asegurarse de que el estado guardado sea consistente
+            self.config_manager.save_configs() 
+            

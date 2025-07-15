@@ -1,8 +1,6 @@
-from PyQt5.QtGui import QColor, QFont, QPalette
-from PyQt5.QtWidgets import QWidget, QPushButton, QTableWidget, QGroupBox, QListWidget, QTreeWidget, QLineEdit, QComboBox, QCheckBox, QRadioButton, QApplication
+from PyQt5.QtGui import QFont, QColor
 
-# --- Configuración de Estilo Breeze ---
-# Colores centralizados para fácil modificación, inspirados en Plasma 6.0 Breeze
+# Configuración de Estilo Breeze
 COLOR_BREEZE_PRIMARY = "#3daee9"  # Azul Breeze estándar
 COLOR_BREEZE_ACCENT = "#5dbff2"   # Azul más claro para efectos de hover y foco
 COLOR_BREEZE_PRESSED = "#2980b9"  # Azul más oscuro para estado presionado
@@ -33,13 +31,11 @@ COLOR_BREEZE_DARK_BORDER = "#5A5F65" # Color de borde
 COLOR_BREEZE_DARK_DISABLED_BG = "#4A4F54"
 COLOR_BREEZE_DARK_DISABLED_TEXT = "#808080"
 
-
 STYLE_BREEZE = {
     "font": QFont("Noto Sans", 11),
     "title_font": QFont("Noto Sans", 13, QFont.Bold),
     "light_border": COLOR_BREEZE_LIGHT_BORDER,
     "dark_border": COLOR_BREEZE_DARK_BORDER,
-    # Estilo de botón para Breeze (más plano, sutil hover/pressed)
     "button_style": f"""
         QPushButton {{
             background-color: {COLOR_BREEZE_LIGHT_BUTTON};
