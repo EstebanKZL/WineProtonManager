@@ -1,24 +1,23 @@
-# Instalación de WineProton Manager
+# WineProton Manager Installation Guide
 
-## Dependencias
+This guide provides instructions on how to run WineProton Manager from the source code or build your own AppImage from scratch.
 
-- Python 3.6 o superior
-- PyQt5
-- Wine o Proton instalado
-- Konsole (para la salida de terminal)
+1. Prerequisites
+   ```bash
+   sudo apt update
+   sudo apt install python3-venv git wine winetricks konsole kdialog libssl3
 
-## Instalación desde código fuente
-
-Ejecutar aplicación
-
-1. Clona el repositorio:
+2. Clona el repositorio:
    ```bash
    sudo apt install wine winetricks konsole kdialog libssl3
    git clone https://github.com/EstebanKZL/WineProtonManager.git
    cd WineProtonManager
 
-2. Instala las dependencias:
+3. Instala las dependencias:
    ```bash
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install --upgrade pip
    pip install -r requirements.txt
 
 3. Ejecuta la aplicación:
@@ -26,6 +25,7 @@ Ejecutar aplicación
    ```bash
    python3 main.py
 
+---
 
 Creación de AppImage
 
