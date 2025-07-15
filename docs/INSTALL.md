@@ -4,77 +4,64 @@ This guide provides instructions on how to run WineProton Manager from the sourc
 
 ## Run the Application
 
-1. Prerequisites
+1. Install Prerequisites:
    ```bash
-   # 🔧 Instalando dependencias del sistema
+   # 🔧 Install system dependencies
    sudo apt update
    sudo apt install python3-venv git wine winetricks konsole kdialog libssl3
 
 2. Clone the Repository:
    ```bash
-   # 📦 Descargar Repositor
+   # 📦 Clone repository
    sudo apt install wine winetricks konsole kdialog libssl3
    git clone https://github.com/EstebanKZL/WineProtonManager.git
    cd WineProtonManager
 
 3. Set Up a Virtual Environment and Install Dependencies:
    ```bash
-   # Create the virtual environment
+   # 🐍 Install packages from requirements.txt
    python3 -m venv .venv
-   
-   # Activate the environment
    source .venv/bin/activate
-   
-   # Upgrade pip and install packages from requirements.txt
    pip install --upgrade pip
    pip install -r requirements.txt
 
 3. Run the Application:
-
    ```bash
-   # 🏃 Ejecutar
+   # 🏃 Run
    python3 main.py
 
 ---
 
 ## Building the AppImage (for Developers)
 
-1. Prerequisites
+1. Install Prerequisites
    ```bash
-   # 🔧 Instalando dependencias del sistema
+   # 🔧 Install system dependencies
    sudo apt update
    sudo apt install python3-venv git wine winetricks konsole kdialog libssl3 imagemagick
 
 2. Clone the Repository:
-
    ```bash
-   # 📦 Descargar Repositor
+   # 📦 Clone repository
    git clone https://github.com/EstebanKZL/WineProtonManager.git
    cd WineProtonManager
    
 3. Download AppImage Build Tools:
-
    ```bash
-   # ⬇️ Descargando herramientas de construcción
+   # ⬇️ Download build tools
    wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-   chmod +x linuxdeploy-x86_64.AppImage
-   
    wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
-   chmod +x appimagetool-x86_64.AppImage
+   chmod +x linuxdeploy-x86_64.AppImage appimagetool-x86_64.AppImage
 
-3. Set Up a Virtual Environment and Install Dependencies:
+4. Set Up a Virtual Environment and Install Dependencies:
    ```bash
-   # Create the virtual environment
+   # 🐍 install packages from requirements.txt
    python3 -m venv .venv
-   
-   # Activate the environment
    source .venv/bin/activate
-   
-   # Upgrade pip and install packages from requirements.txt
    pip install --upgrade pip
    pip install -r requirements.txt
 
-   # 🔨 Compilando con PyInstaller
+   # 🔨 Compile with PyInstaller
    pyinstaller --onefile --noconfirm --clean \
     --add-data "/usr/lib/x86_64-linux-gnu/libssl.so.3:." \
     --add-data "/usr/lib/x86_64-linux-gnu/libcrypto.so.3:." \
@@ -87,12 +74,13 @@ This guide provides instructions on how to run WineProton Manager from the sourc
     --exclude-module PyQt5.QtBodymovin \
     main.py
    
-2. Crear AppRun & Desktop & Icon
+5. Create AppRun, Desktop File, and Icon:
    ```bash
-   # 📁 Preparando AppDir
-   mkdir -p AppDir/
+   # 📁 Prepare AppDir
+   mkdir -p AppDir/usr/bin
+   cp dist/main AppDir/usr/bin/main
 
-   #🏃 Creando AppRun
+   #🔨 Create AppRun
    cat << 'EOF' > ./AppDir/AppRun
    #!/bin/sh
    HERE="$(dirname "$(readlink -f "$0")")"
@@ -105,7 +93,7 @@ This guide provides instructions on how to run WineProton Manager from the sourc
    EOF
    chmod +x ./AppDir/AppRun
 
-   # 🖥️ Creando archivo .desktop
+   # 🖥️ Create .desktop file
    cat << EOF > ./AppDir/WineProtonManager.desktop
    #!/bin/sh
    [Desktop Entry]
@@ -117,15 +105,13 @@ This guide provides instructions on how to run WineProton Manager from the sourc
    Comment=Herramienta de gestión para Wine/Proton
    EOF
 
-   # 🖼️ Procesando icono
+   # 🖼️ Process icon
    mkdir -p AppDir/usr/share/icons/hicolor/512x512/apps
    cp icons/WineProtonManager.png AppDir/usr/share/icons/hicolor/512x512/apps/WineProtonManager.png
    
-3. Construye la AppImage:
-
+6. Build the AppImage:
    ```bash
-
-   # 🏗️ Construyendo AppImage
+   # 🏗️ Build AppImage
    ./linuxdeploy-x86_64.AppImage \
     --appdir AppDir \
     -e "AppDir/usr/bin/main" \
@@ -133,14 +119,10 @@ This guide provides instructions on how to run WineProton Manager from the sourc
     -d "AppDir/WineProtonManager.desktop" \
     --output appimage
 
-   mkdir -p /AppDir/usr/share/icons/hicolor/512x512/apps
-   cp /icons/WineProtonManager.png /AppDir/usr/share/icons/hicolor/512x512/apps/WineProtonManager.png
-   convert -size 512x512 xc:white -fill black -draw "circle 256,256 256,50" /AppDir/usr/share/icons/hicolor/512x512/apps/WineProtonManager.png
+   🔍 Finalize build
+    ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir
    
-   ./linuxdeploy-x86_64.AppImage --appdir AppDir -e dist/main -i icons/WineProtonManager.png -d AppDir/WineProtonManager.desktop
-   ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir
-
-4. Ejecutar programa
-   
+7. Ejecutar programa
    ```bash
-   ./WineProtonManager-v1.1.0-x86_64.AppImage
+    # 🏃 Run AppImage
+   ./WineProtonManager-x86_64.AppImage
