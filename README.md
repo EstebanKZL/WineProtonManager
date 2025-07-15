@@ -54,25 +54,37 @@
 
 ---
 
-## 🚀 Getting Started / Primeros Pasos
+## Run the Application
 
-### 📦 Installation / Instalación
+1. Install Prerequisites:
+   ```bash
+   # 🔧 Install system dependencies
 
-    ```bash
-    # Debian/Ubuntu
-    sudo apt install wine winetricks konsole kdialog libssl3
-    # Arch Linux
-    sudo pacman -S wine winetricks konsole kdialog openssl
-    # Fedora
-    sudo dnf install wine winetricks konsole kdialog openssl
+   # Debian/Ubuntu
+   sudo apt update
+   sudo apt install python3-venv git wine winetricks konsole kdialog libssl3
+   # Arch Linux
+   sudo pacman -S python3-venv git wine winetricks konsole kdialog libssl3
+   # Fedora
+   sudo dnf install python3-venv git wine winetricks konsole kdialog libssl3
 
-```bash
-git clone https://github.com/EstebanKZL/WineProtonManager.git
-cd WineProtonManager
 
-python -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+2. Clone the Repository:
+   ```bash
+   # 📦 Clone repository
+   sudo apt install wine winetricks konsole kdialog libssl3
+   git clone https://github.com/EstebanKZL/WineProtonManager.git
+   cd WineProtonManager
 
-python3 main.py
+3. Set Up a Virtual Environment and Install Dependencies:
+   ```bash
+   # 🐍 Install packages from requirements.txt
+   python3 -m venv .venv
+   source .venv/bin/activate
+   pip install --upgrade pip
+   pip install -r requirements.txt
+
+3. Run the Application:
+   ```bash
+   # 🏃 Run
+   python3 main.py
