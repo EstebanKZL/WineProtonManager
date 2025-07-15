@@ -14,31 +14,28 @@
 
 ---
 
-## ✨ Key Features / Características Principales
+## ✨ Key Features
 
-### 🛠️ Core Functionality
-- **Prefix Lifecycle Management**  
-  Create, clone, repair, and delete prefixes with visual feedback
-- **Version Switcher**  
-  Seamlessly switch between Wine/Proton versions per application
-- **Winetricks Integration**  
-  Automated installation of common components (DirectX, .NET, etc.)
+### 🛠️ Environment & Prefix Management
+- **Multiple Environment Profiles** Create and manage separate configurations for different games or applications, each with its own Wine/Proton version, architecture, and prefix path.
+- **Prefix Initialization & Tools** Create new Wine prefixes with visual feedback. Instantly access essential tools for any prefix, including `winecfg`, `explorer`, `winetricks-gui`, and a pre-configured terminal.
+- **Sandbox-Style Isolation** Easily manage multiple, isolated Wine prefixes to prevent application conflicts and ensure clean, stable environments for your software.
 
-### 🎮 Gaming Optimizations
-- **Steam Deck Verified**  
-  Touchscreen-optimized UI with controller support
-- **Game-Specific Profiles**  
-  Save optimal configurations for each title
-- **Performance Tweaks**  
-  Pre-configured optimizations for gaming
+### 📦 Installation & Component Management
+- **Unified Installer** Install components from multiple sources in a single queue: Winetricks verbs (like `d3dcompiler_47`), Windows installers (`.exe`/`.msi`), and custom Winetricks scripts (`.wtr`).
+- **Batch Installation Queue** Add multiple items to an installation queue and manage it by reordering, deleting, or temporarily skipping items. The process continues automatically even if one item fails.
+- **Winetricks Component Browser** Easily browse and select common Winetricks components from organized categories like 'DirectX', '.NET Framework', and 'Visual C++ Runtimes'.
+- **Non-Blocking UI** The user interface remains fully responsive during downloads and installations, allowing you to monitor progress without the app freezing.
 
-### 🖥️ Desktop Enhancements
-- **EXE/MSI Launcher**  
-  Run Windows installers directly from the UI
-- **Sandbox Environments**  
-  Isolate risky applications in disposable prefixes
-- **System Monitoring**  
-  Real-time resource usage tracking
+### 🎮 Steam Integration
+- **Full Steam Library View** Automatically detects and displays all your installed Steam games and Non-Steam shortcuts in a dedicated tab.
+- **Per-Game Proton Version Control** Assign specific official or custom (Proton-GE) Proton versions to any game directly from the manager, with changes saved safely to your Steam configuration.
+- **ProtonDB Integration** View at-a-glance ProtonDB compatibility ratings (Platinum, Gold, Silver, etc.) for your games to anticipate performance and potential issues.
+
+### 📂 Version & Backup Management
+- **Wine/Proton Downloader** Browse, download, and manage different Wine and Proton versions directly from community GitHub repositories (like GloriousEggroll and Kron4ek) via a built-in repository manager.
+- **Advanced Backup System** Perform robust backups of your prefixes. Choose between a **Full Backup** (a new timestamped copy) or an **Incremental Backup** (using `rsync` to efficiently update an existing full backup).
+- **Pre-Action Safety Prompts** Get automatically prompted to create a backup before running potentially destructive actions, ensuring your important prefixes are always safe.
 
 ---
 
