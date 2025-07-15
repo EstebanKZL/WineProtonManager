@@ -49,10 +49,9 @@ git clone https://github.com/EstebanKZL/WineProtonManager.git
 cd WineProtonManager
 
 # Instalar dependencias / Install dependencies
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 
 # Ejecutar / Run
 python3 main.py
-
-cd WineProtonManager
-
