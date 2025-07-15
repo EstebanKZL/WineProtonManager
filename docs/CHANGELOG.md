@@ -1,181 +1,195 @@
-# Changelog Novedades
+# Changelog
+
+## [v1.5.0] - 2025-07-15 🎉
+
+**The Steam Integration Update! This version introduces full management of your Steam library directly within the application.**
+
+### ✨ Main Features: Steam Library Management
+
+* **Automatic Game Detection:**
+    * The app now scans all your Steam libraries to find both native **Steam games** and **Non-Steam shortcuts**.
+* **On-the-Fly Proton Version Switching:**
+    * Change the compatibility tool for any game directly from a dropdown menu.
+    * Supports official Proton, Proton-GE, and other custom versions.
+* **ProtonDB Ratings:**
+    * Fetches and displays the latest ProtonDB compatibility rating (Platinum, Gold, Borked, etc.) for each game.
+* **Safe Configuration Saving:**
+    * The app safely modifies Steam's configuration files, creating a backup first and prompting you to close Steam to ensure data integrity.
 
 ## [v1.4.0] - 2025-07-12 🎉
 
-**¡Esta versión trae una renovación significativa en la interfaz de usuario y mejoras internas clave para una experiencia más fluida y robusta!**
+**This version brings a significant UI overhaul and key internal improvements for a smoother, more robust experience!**
 
-### ✨ Novedades y Mejoras:
+### ✨ Features and Improvements:
 
-* **Diseño de Interfaz Casi Nuevo (Breeze Style):**
-    * Implementación de un sistema de estilos inspirado en "Breeze" de Plasma 6.0, con colores y tipografías centralizadas para un aspecto más moderno y consistente.
-    * Se han definido y aplicado paletas de colores separadas para temas claros y oscuros, mejorando la legibilidad y la estética general.
-    * Estilos mejorados para botones, tablas, GroupBox, listas, árboles, campos de texto (QLineEdit) y combobox (QComboBox), incluyendo efectos de `:hover` y `:pressed` para una mejor interactividad.
-    * **MODIFICACIÓN 3:** Ajuste del tamaño de fuente en varios widgets como QListWidget y QTreeWidget para mejorar la densidad de información y la lectura.
+* **Complete UI Overhaul (Breeze Style):**
+    * Implemented a style system inspired by Plasma 6.0's "Breeze," with centralized colors and typography for a modern and consistent look.
+    * Defined and applied separate color palettes for light and dark themes, improving readability and overall aesthetics.
+    * Improved styles for buttons, tables, GroupBoxes, lists, trees, text fields (QLineEdit), and comboboxes (QComboBox), including `:hover` and `:pressed` effects for better interactivity.
+    * Font sizes adjusted in various widgets like QListWidget and QTreeWidget to enhance information density and reading.
 
-* **Gestión de Logs Unificada y Mejorada:**
-    * Centralización de la gestión de logs de instalación en un archivo `installation.log` dentro del directorio de configuración.
-    * Implementación de un log de backup separado (`backup.log`) para un seguimiento más claro de las operaciones de respaldo.
-    * Todos los mensajes de log incluyen ahora marcas de tiempo y el nombre del programa o acción, facilitando la depuración y el seguimiento.
+* **Unified and Improved Log Management:**
+    * Centralized installation log management into a single `.log` file within the config directory.
+    * All log messages now include timestamps and the name of the program or action, facilitating debugging and tracking.
 
-* **Lógica de Backup Renovada y más Segura:**
-    * **MODIFICACIÓN:** La ruta del último backup completo ahora se almacena por *cada configuración* de Wine/Proton, permitiendo backups incrementales (Rsync) más precisos para entornos específicos.
-    * El proceso de backup completo crea una carpeta con un `timestamp` para evitar sobrescrituras accidentales.
-    * Los backups incrementales (Rsync) ahora requieren un backup completo previo para la configuración actual, con advertencias claras si no existe.
-    * Diálogos de backup más informativos y con opciones claras para "Rsync (Incremental)" o "Backup Completo (Nuevo)".
-    * Mejoras en el manejo de errores durante el proceso de backup y limpieza de archivos temporales.
+* **Revamped and Safer Backup Logic:**
+    * **CHANGE:** The path to the last full backup is now stored for *each* Wine/Proton configuration, allowing for more precise incremental (Rsync) backups for specific environments.
+    * The full backup process now creates a folder with a `timestamp` to prevent accidental overwrites.
+    * Incremental backups (Rsync) now require a previous full backup for the current configuration, with clear warnings if one doesn't exist.
+    * More informative backup dialogs with clear options for "Rsync (Incremental)" or "Full Backup (New)".
+    * Improved error handling during the backup process and cleanup of temporary files.
 
-* **Mejoras en la Instalación de Programas y Componentes:**
-    * **MODIFICACIÓN 1:** La lista de instalación ahora mantiene el estado de los ítems ("Finalizado", "Error", "Omitido", "Cancelado"), y los ítems con error/cancelados permanecen marcados para facilitar reintentos.
-    * **MODIFICACIÓN 1:** Introducción de un `item_error` signal en `InstallerThread` para manejar errores de ítems individuales sin detener toda la secuencia de instalación.
-    * El diálogo de progreso de instalación ahora es "NonModal", permitiendo al usuario interactuar con la ventana principal (ver la tabla de ítems, por ejemplo) mientras la instalación está en curso, aunque los botones de control de instalación se deshabilitan correctamente.
-    * Al re-tildar un programa en la tabla después de una instalación, su estado se restablece a "Pendiente".
-    * Mensajes de advertencia más claros al intentar añadir programas/componentes que ya están en la lista o registrados como instalados en el prefijo.
-    * El proceso de inicialización de prefijos (`wineboot`) ahora se maneja de forma más robusta y con mensajes de progreso.
-    * **MODIFICACIÓN 3:** Los registros de instalación exitosa en `wineprotonmanager.ini` ahora incluyen el tipo de ítem y la ruta/nombre original para mayor detalle.
+* **Improvements in Program and Component Installation:**
+    * **CHANGE:** The installation list now maintains item states ("Finished", "Error", "Skipped", "Cancelled"), and items with errors/cancellations remain checked to facilitate retries.
+    * **CHANGE:** Introduced an `item_error` signal in `InstallerThread` to handle individual item errors without halting the entire installation sequence.
+    * The installation progress dialog is now "NonModal," allowing the user to interact with the main window (e.g., view the item table) while an installation is in progress, though control buttons are correctly disabled.
+    * Re-checking a program in the table after an installation resets its status to "Pending."
+    * Clearer warning messages when trying to add programs/components that are already on the list or registered as installed in the prefix.
+    * The prefix initialization process (`wineboot`) is now handled more robustly and with progress messages.
+    * Successful installation records in `wineprotonmanager.ini` now include the item type and original path/name for greater detail.
 
-* **Direccionamiento y Persistencia de Rutas de Carpeta:**
-    * **MODIFICACIÓN 4:** La aplicación ahora recuerda la última carpeta explorada para diferentes tipos de archivos (prefijos Wine/Proton, instalaciones de Wine/Proton, programas, Winetricks), mejorando la usabilidad al abrir diálogos de archivo.
+* **Folder Path Persistence:**
+    * **CHANGE:** The application now remembers the last browsed folder for different file types (Wine/Proton prefixes, Wine/Proton installations, programs, Winetricks), improving usability when opening file dialogs.
 
-* **Robustez y Manejo de Errores:**
-    * Mejora general en el manejo de excepciones y validaciones de rutas para operaciones críticas (descargas, descompresiones, comandos de Wine/Proton).
-    * Aumento del límite de recursión de Python para prevenir `RecursionError` en entornos con muchas configuraciones o listas largas.
-    * Manejo más eficiente de la interrupción de hilos de descarga e instalación.
+* **Robustness and Error Handling:**
+    * General improvements in exception handling and path validation for critical operations (downloads, decompressions, Wine/Proton commands).
+    * Increased Python's recursion limit to prevent `RecursionError` in environments with many configurations or long lists.
+    * More efficient handling of download and installation thread interruptions.
 
-### ⚠️ Consideraciones Importantes:
+### ⚠️ Important Considerations:
 
-* **Reiniciar la Aplicación:** Los cambios en la configuración del tema y otras configuraciones generales ahora requieren un reinicio completo de la aplicación para aplicarse globalmente. El diálogo de configuración lo indicará y facilitará el reinicio.
-* **Permisos de Winetricks:** Se ha mejorado la detección y validación de la ruta de Winetricks. Si tienes problemas, asegúrate de que el archivo `winetricks` tenga permisos de ejecución.
-* **Compatibilidad de Winetricks Scripts (.wtr):** La adición de scripts `.wtr` personalizados para instalación de componentes de Winetricks permite mayor flexibilidad.
+* **Restarting the Application:** Changes to the theme and other general settings now require a full application restart to be applied globally. The configuration dialog will indicate this and facilitate the restart.
+* **Winetricks Permissions:** Winetricks path detection and validation have been improved. If you encounter issues, ensure the `winetricks` file has execution permissions.
+* **Winetricks Script Compatibility (.wtr):** The addition of custom `.wtr` scripts for installing Winetricks components allows for greater flexibility.
+
 ## [v1.3.0] - 2025-07-09 🎉
-### Descarga de Repositorios para Wine y Proton
-- Nueva pestaña "Descargas de Versiones" en el diálogo de configuración
-  - Permite añadir/eliminar/habilitar/deshabilitar repositorios de GitHub
-- Búsqueda y listado de versiones disponibles:
-  - Proton: desde (API de GitHub)
-  - Wine: desde (API de GitHub)
-- Descarga y descompresión automática en:
-  - `~/.config/WineProtonManager/Wine`
-  - `~/.config/WineProtonManager/Proton`
-- Operaciones en hilos separados:
-  - `DownloadThread` para descargas
-  - `DecompressionThread` para descompresión
-  - Con diálogo de progreso interactivo
-- Verificación de espacio en disco antes de descargar
 
-### Instalación Forzada (--force)
-- Nueva opción de configuración (global y por sesión)
-- Permite forzar instalación de componentes Winetricks con `--force`
-- Útil para reinstalar/reparar componentes existentes
+### Repository Downloads for Wine and Proton
+- New "Version Downloads" tab in the configuration dialog
+    - Allows adding/removing/enabling/disabling GitHub repositories
+- Search and list available versions:
+    - Proton: from (GitHub API)
+    - Wine: from (GitHub API)
+- Automatic download and decompression into:
+    - `~/.config/WineProtonManager/Wine`
+    - `~/.config/WineProtonManager/Proton`
+- Operations in separate threads:
+    - `DownloadThread` for downloads
+    - `DecompressionThread` for decompression
+    - With an interactive progress dialog
+- Disk space check before downloading
 
-## Mejoras
+### Force Installation (--force)
+- New configuration option (global and per-session)
+- Allows forcing the installation of Winetricks components with `--force`
+- Useful for reinstalling/repairing existing components
 
-### Diseño y Estilo (inspirado en Steam Deck)
-- Rediseño completo de la interfaz con estética Steam Deck
-- Centralización de variables de color
-- Estilos unificados (`STYLE_STEAM_DECK`)
-- Paletas de colores personalizadas para:
-  - `QApplication`, `QWidget`, `QPushButton`, `QGroupBox`
-  - `QLabel`, `QComboBox`, `QLineEdit`, `QListWidget`
-  - `QTableWidget`, `QTreeWidget`
-- Ajustes en:
-  - Tamaños de fuente
-  - Bordes y rellenos
-  - Estados visuales (hover, pressed, disabled)
+## Improvements
 
-### Método de Instalación de Programas (Winetricks, EXE y WTR)
-- Proceso unificado de instalación (`InstallerThread`):
-  - Soporta `.exe` y `.msi`
-  - Componentes Winetricks por nombre
-  - Scripts Winetricks personalizados (`.wtr`)
-- Ejecución en ventana Konsole separada (`nohup konsole -e ...`)
-- Sistema de registro detallado por programa (`ConfigManager.write_to_log`)
-- Registro de instalaciones en prefijos (`wineprotonmanager.log`)
-- Tabla principal muestra estados:
-  - Pendiente, Instalando..., Finalizado
-  - Error, Cancelado, Omitido
-  - Con indicadores de color
-- Funcionalidades adicionales:
-  - Selección/deselección de elementos
-  - Reordenación con "Mover Arriba"/"Mover Abajo"
-  - Auto-desmarcado de instalaciones exitosas
+### Design and Style (inspired by Steam Deck)
+- Complete UI redesign with a Steam Deck aesthetic
+- Centralization of color variables
+- Unified styles (`STYLE_STEAM_DECK`)
+- Custom color palettes for:
+    - `QApplication`, `QWidget`, `QPushButton`, `QGroupBox`
+    - `QLabel`, `QComboBox`, `QLineEdit`, `QListWidget`
+    - `QTableWidget`, `QTreeWidget`
+- Adjustments to:
+    - Font sizes
+    - Borders and padding
+    - Visual states (hover, pressed, disabled)
 
-### Descripciones de Componentes en Winetricks
-- Nueva columna "Descripción" en diálogo de selección
-- Descripciones detalladas para:
-  - Librerías de Visual Basic
-  - Tiempos de ejecución de Visual C++
-  - .NET Framework
-  - DirectX y multimedia
-  - DXVK/VKD3D
-  - Códecs
-  - Componentes del sistema
+### Program Installation Method (Winetricks, EXE, and WTR)
+- Unified installation process (`InstallerThread`):
+    - Supports `.exe` and `.msi`
+    - Winetricks components by name
+    - Custom Winetricks scripts (`.wtr`)
+- Execution in a separate Konsole window (`nohup konsole -e ...`)
+- Detailed logging system per program (`ConfigManager.write_to_log`)
+- Installation logging in prefixes (`wineprotonmanager.log`)
+- Main table shows statuses:
+    - Pending, Installing..., Finished
+    - Error, Cancelled, Skipped
+    - With color indicators
+- Additional features:
+    - Selection/deselection of items
+    - Reordering with "Move Up"/"Move Down"
+    - Auto-unchecking of successful installations
 
-## Cambios Internos
+### Component Descriptions in Winetricks
+- New "Description" column in the selection dialog
+- Detailed descriptions for:
+    - Visual Basic libraries
+    - Visual C++ runtimes
+    - .NET Framework
+    - DirectX and multimedia
+    - DXVK/VKD3D
+    - Codecs
+    - System components
 
-### Gestión de Configuración (ConfigManager)
-- Refactorización completa para centralizar configuraciones
-- Inicialización con valores por defecto (ej. "Wine-System")
-- Mejor manejo de variables de entorno Wine/Proton
-- Nueva función `get_installed_winetricks` para historial de instalaciones
+## Internal Changes
 
-### Hilos de Ejecución
-- Uso consistente de `QThread` para operaciones largas
-- Mejoras en sistema de señales y slots
-- Comunicación más eficiente entre hilos y GUI
+### Configuration Management (ConfigManager)
+- Complete refactoring to centralize configurations
+- Initialization with default values (e.g., "Wine-System")
+- Better handling of Wine/Proton environment variables
+- New `get_installed_winetricks` function for installation history
 
-### Diálogos Modales
-- Aplicación automática del tema actual (`apply_theme_to_dialog`)
+### Execution Threads
+- Consistent use of `QThread` for long operations
+- Improvements in the signals and slots system
+- More efficient communication between threads and the GUI
 
-### Manejo de Errores
-- Mayor robustez en:
-  - Operaciones con archivos
-  - Operaciones de red
-  - Procesos externos
-- Mensajes de error más informativos
-- Logs temporales para instalaciones
+### Modal Dialogs
+- Automatic application of the current theme (`apply_theme_to_dialog`)
+
+### Error Handling
+- Increased robustness in:
+    - File operations
+    - Network operations
+    - External processes
+- More informative error messages
+- Temporary logs for installations
 
 ## [v1.2.0] - 2025-07-06 🎉
-#### Gestión de Consola (Konsole)
--   **Nuevo**: Cierre automático de Konsole al finalizar cada instalación
--   **Cambio**: Reemplazo de `--noclose` por `--hold` para mejor comportamiento
--   **Añadido**: Comando `exit` explícito para garantizar cierre de terminal
--   **Optimización**: Tiempo de espera reducido entre instalaciones
 
-#### Sistema de Logs Mejorado
--   **Nuevo**: Captura completa del output de consola en archivos log
--   **Mejora**: Formato estandarizado con marcas de inicio/fin
--   **Añadido**: Registro del comando exacto ejecutado
--   **Fijo**: Corrección de encoding (UTF-8) para caracteres especiales
+#### Console Management (Konsole)
+- **New**: Automatic closing of Konsole after each installation finishes
+- **Change**: Replaced `--noclose` with `--hold` for better behavior
+- **Added**: Explicit `exit` command to ensure terminal closure
+- **Optimization**: Reduced wait time between installations
 
-#### Flujo de Instalación
--   **Optimización**: Uso de `subprocess.Popen` + `wait()` para mejor control
--   **Mejora**: Manejo consistente para .exe y componentes winetricks
--   **Fijo**: Eliminación adecuada de archivos temporales post-instalación
+#### Improved Logging System
+- **New**: Full capture of console output in log files
+- **Improvement**: Standardized format with start/end markers
+- **Added**: Logging of the exact command executed
+- **Fixed**: Corrected encoding (UTF-8) for special characters
 
-#### Experiencia de Usuario
--   **Nuevo**: Mensajes de progreso más descriptivos
--   **Mejora**: Códigos de error más informativos
--   **Optimización**: Verificación previa de dependencias (konsole)
+#### Installation Flow
+- **Optimization**: Use of `subprocess.Popen` + `wait()` for better control
+- **Improvement**: Consistent handling for .exe and Winetricks components
+- **Fixed**: Proper deletion of temporary files post-installation
 
-### Correcciones de Bugs
--   **Fijo**: Consola que no se cerraba automáticamente
--   **Fijo**: Pérdida de logs en instalaciones rápidas
--   **Fijo**: Manejo de paths con espacios especiales
--   **Fijo**: Limpieza de procesos residuales
+#### User Experience
+- **New**: More descriptive progress messages
+- **Improvement**: More informative error codes
+- **Optimization**: Pre-check for dependencies (konsole)
+
+### Bug Fixes
+- **Fixed**: Console not closing automatically
+- **Fixed**: Loss of logs in rapid installations
+- **Fixed**: Handling of paths with special spaces
+- **Fixed**: Cleanup of residual processes
 
 ## [v1.1.0] - 2025-07-05 🎉
 ### Fixed
-- Corrección de errores en gestión de prefixes
-- Mejoras en la detección de versiones
-- Fixed reparacion en la instlacion (.exe y .msi)
+- Fixed errors in prefix management
+- Improvements in version detection
+- Fixed installation repair (.exe and .msi)
 
 ## [v1.0.0] - 2025-07-05 🎉
 ### Added
-- Implementación inicial del gestor de entornos
-- Soporte para Wine y Proton
-- Sistema de instalación de componentes via Winetricks
-- Interfaz con temas claro/oscuro
-
-### Fixed
-- Corrección de errores en gestión de prefixes
-- Mejoras en la detección de versiones
+- Initial implementation of the environment manager
+- Support for Wine and Proton
+- Component installation system via Winetricks
+- Interface with light/dark themes
