@@ -8,7 +8,7 @@
 ---
 
 
-| 🇬🇧 **English** | 🇦🇷 **Español** |
+|   **English**  |   **Español**  |
 |----------------|----------------|
 | **WineProton Manager** is an advanced Python tool that revolutionizes how you manage Wine and Proton prefixes on Linux systems, including Steam Deck. It provides:<br><br>• **One-click environment management** for games and Windows applications<br>• **Deep Proton integration** with Steam compatibility<br>• **Automated dependency handling** via Winetricks<br>• **Cross-distribution support** with optimized performance<br><br>Perfect for gamers, developers, and Linux enthusiasts who need precise control over their compatibility layers. | **WineProton Manager** es una herramienta avanzada en Python que revoluciona la gestión de prefixes de Wine y Proton en Linux, incluyendo Steam Deck. Ofrece:<br><br>• **Gestión de entornos con un clic** para juegos y aplicaciones Windows<br>• **Integración profunda con Proton** y compatibilidad con Steam<br>• **Manejo automático de dependencias** mediante Winetricks<br>• **Soporte multi-distribución** con rendimiento optimizado<br><br>Ideal para gamers, desarrolladores y entusiastas de Linux que necesitan control preciso sobre sus capas de compatibilidad. |
 
