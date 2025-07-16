@@ -2,3 +2,5 @@ PyQt5
 vdf
 PyInstaller
 setuptools
+pefile       
+requests
