@@ -8,7 +8,7 @@ This guide provides instructions on how to run WineProton Manager from the sourc
    ```bash
    # 🔧 Install system dependencies
    sudo apt update
-   sudo apt install python3-venv git wine winetricks konsole kdialog libssl3
+   sudo apt install python3-dev python3-pyqt5 qt5-default git wine winetricks konsole kdialog libssl3
 
 2. Clone the Repository:
    ```bash
@@ -38,7 +38,7 @@ This guide provides instructions on how to run WineProton Manager from the sourc
    ```bash
    # 🔧 Install system dependencies
    sudo apt update
-   sudo apt install python3-venv git wine winetricks konsole kdialog libssl3 imagemagick
+   sudo apt install python3-dev python3-pyqt5 qt5-default git wine winetricks konsole kdialog libssl3 imagemagick
 
 2. Clone the Repository:
    ```bash
