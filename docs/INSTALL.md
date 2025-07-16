@@ -13,7 +13,6 @@ This guide provides instructions on how to run WineProton Manager from the sourc
 2. Clone the Repository:
    ```bash
    # 📦 Clone repository
-   sudo apt install wine winetricks konsole kdialog libssl3
    git clone https://github.com/EstebanKZL/WineProtonManager.git
    cd WineProtonManager
 
